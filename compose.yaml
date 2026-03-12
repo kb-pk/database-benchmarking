@@ -1,0 +1,52 @@
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    restart: unless-stopped
+    container_name: mssql
+    environment:
+      ACCEPT_EULA: "y"
+      MSSQL_PID: "EnterpriseDeveloper"
+      
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PWD:?}"
+    networks:
+      - mssql
+
+  postgres:
+    image: postgres:18.3
+    restart: unless-stopped
+    container_name: "postgres"
+    environment:
+      POSTGRES_USER: "test"
+      POSTGRES_PASSWORD: "${POSTGRES_PWD:?}"
+      POSTGRES_DB: "test"
+    networks:
+      - postgres
+
+  cassandra:
+    image: cassandra:5.0.6
+    restart: unless-stopped
+    container_name: "cassandra"
+    networks:
+      - cassandra
+
+  scylla:
+    image: scylladb/scylla:2025.3
+    restart: unless-stopped
+    container_name: "scylladb"
+    networks:
+      - scylla
+
+
+networks:
+  mssql:
+    name: mssql
+    internal: true
+  postgres:
+    name: postgres
+    internal: true
+  cassandra:
+    name: cassandra
+    internal: true
+  scylla:
+    name: scylla
+    internal: true
