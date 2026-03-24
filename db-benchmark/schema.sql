@@ -24,7 +24,6 @@ CREATE TABLE BookShop (
     shopName VARCHAR(255) NOT NULL,
     address VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
-    managerId INT REFERENCES Employee(id)
 )
 
 CREATE TABLE BookShopOffering (
