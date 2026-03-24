@@ -1,4 +1,4 @@
-CREATE day_name AS ENUM (
+CREATE TYPE day_name AS ENUM (
        'Monday',
        'Tuesday',
        'Wednesday',
@@ -23,9 +23,6 @@ CREATE TABLE BookShop (
     id INT PRIMARY KEY NOT NULL,
     shopName VARCHAR(255) NOT NULL,
     address VARCHAR(255) NOT NULL,
-    opensAt TIME,
-    closesAt TIME,
-    whenOpen day_name,
     email VARCHAR(255) NOT NULL,
     managerId INT REFERENCES Employee(id)
 )
@@ -40,7 +37,7 @@ CREATE TABLE BookReservations (
     id INT NOT NULL PRIMARY KEY,
     bookId INT NOT NULL REFERENCES Book(id),
     userId INT NOT NULL REFERENCES User(id),
-    whenReserved DATE NOT NULL,
+    whenReserved DATE NOT NULL
 )
 
 CREATE TABLE BookRentals (
@@ -57,7 +54,7 @@ CREATE TABLE BookRentals (
 
 CREATE TABLE BookRentalMethod (
     id NOT NULL PRIMARY KEY,
-    method VARCHAR(255) NOT NULL,
+    method VARCHAR(255) NOT NULL
 )
 
 CREATE TABLE Employee (
@@ -81,13 +78,12 @@ CREATE TABLE User (
     email VARCHAR(255) NOT NULL,
     mainBookShopId INT REFERENCES BookShop(id),
     isActiveId INT NOT NULL REFERENCES ActivationStatus(id),
-    userCardId INT NOT NULL REFERENCES
 )
 
 CREATE TABLE UserCard (
     id INT NOT NULL PRIMARY KEY,
     cardIdNumber CHAR(30) NOT NULL,
-    userId INT NOT NULL REFERENCES User(id),
+    userId INT REFERENCES User(id), -- moga buc karty bez uzytkownika
     isActiveId INT NOT NULL REFERENCES ActivationStatus(id)
 )
 
@@ -96,7 +92,7 @@ CREATE TABLE UserAccount (
     login VARCHAR(255) NOT NULL,
     passwordHash CHAR(255) NOT NULL,
     userId INT NOT NULL REFERENCES User(id),
-    permissionsId INT NOT NULL REFERENCES
+    permissionsId INT NOT NULL REFERENCES UserAccountPermissions(id)
 )
 
 CREATE TABLE UserAccountPermissions (
