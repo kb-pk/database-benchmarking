@@ -50,9 +50,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-size",
         type=int,
-        required=True,
+        required=False,
         choices=SIZE_CHOICES,
-        help="Rozmiar zbioru danych.",
+        help="Rozmiar zbioru danych (PRZESTARZAŁE - użyj -total-rows).",
+    )
+    parser.add_argument(
+        "-total-rows",
+        type=int,
+        required=False,
+        help="Całkowita liczba rekordów do wygenerowania. System automatycznie wylicza liczbę dla każdej tabeli.",
     )
     parser.add_argument(
         "-engine",
@@ -73,30 +79,54 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Punkt startowy aplikacji."""
     args = parse_args()
+    
+    # Sprawdź parametry
+    if args.total_rows is None and args.size is None:
+        print("ERROR: Musisz podać -total-rows lub -size")
+        return
+    
+    if args.total_rows is not None and args.size is not None:
+        print("WARNING: Obie flagi (-total-rows i -size) podane. Usunę -size i użyję -total-rows")
+        args.size = None
 
     print("=== Generator insertow (szkielet) ===")
 
-    print("\nWybrane parametry:")
-    print(f"- Rozmiar zbioru: {args.size}")
+    if args.total_rows is not None:
+        print("\nWybrane parametry:")
+        print(f"- Całkowita liczba rekordów: {args.total_rows}")
+        dataset_size_for_output = args.total_rows
+        use_total_rows = True
+    else:
+        print("\nWybrane parametry:")
+        print(f"- Rozmiar zbioru: {args.size}")
+        dataset_size_for_output = args.size
+        use_total_rows = False
+    
     print(f"- Silnik: {args.engine}")
 
     engine_family = ENGINE_FAMILIES[args.engine]
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     if engine_family == "relational":
-        generated_content = generate_relational_sql(args.size, None)
+        if use_total_rows:
+            generated_content = generate_relational_sql(args.size or 0, None, args.total_rows)
+        else:
+            generated_content = generate_relational_sql(args.size, None)
         file_extension = "sql"
     elif engine_family == "cassandra":
-        generated_content = generate_cassandra_cql(args.size, None)
+        generated_content = generate_cassandra_cql(dataset_size_for_output, None)
         file_extension = "cql"
     elif engine_family == "scylla":
-        generated_content = generate_scylla_cql(args.size, None)
+        generated_content = generate_scylla_cql(dataset_size_for_output, None)
         file_extension = "cql"
     else:
         raise ValueError(f"Unsupported engine family: {engine_family}")
 
-    output_path = args.output_dir / f"inserts_{args.engine}_{args.size}.{file_extension}"
+    output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.{file_extension}"
     output_path.write_text(generated_content, encoding="utf-8")
+    print(f"- Plik wynikowy: {output_path}")
+    
+    print("\nSzkielet generatora zostal uruchomiony poprawnie.")
 
     print(f"- Plik wynikowy: {output_path}")
     print("\nSzkielet generatora zostal uruchomiony poprawnie.")
