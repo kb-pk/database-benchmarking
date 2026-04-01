@@ -15,10 +15,25 @@ RELATIONAL_TABLES = (
     "UserAccountPermissions",
     "BookRentalMethod",
     "BookShopUser",
+    "Employee",
+    "BookShop",
+    "BookShopOpeningHours",
 )
 
 ACTIVATION_STATUSES = ["ACTIVE", "INACTIVE", "PENDING", "SUSPENDED", "ARCHIVED"]
 BOOK_RENTAL_METHODS = ["Książkomat", "Wypożyczalnia"]
+BOOK_SHOPS = [
+    ("Book Haven", "ul. Dluga 12, Warszawa", "bookhaven@bench.local"),
+    ("Readers Paradise", "ul. Lipowa 8, Krakow", "readersparadise@bench.local"),
+    ("The Book Nook", "ul. Ogrodowa 19, Gdansk", "thebooknook@bench.local"),
+    ("Page Turners", "ul. Sosnowa 4, Wroclaw", "pageturners@bench.local"),
+    ("Literary Lounge", "ul. Klonowa 21, Poznan", "literarylounge@bench.local"),
+    ("Weekend Reads", "ul. Morska 15, Gdynia", "weekendreads@bench.local"),
+    ("Silent Shelf", "ul. Kwiatowa 3, Lublin", "silentshelf@bench.local"),
+    ("Open Chapter", "ul. Rynek 7, Szczecin", "openchapter@bench.local"),
+    ("Amber Pages", "ul. Sloneczna 18, Torun", "amberpages@bench.local"),
+    ("Midnight Stories", "ul. Wiosenna 25, Katowice", "midnightstories@bench.local"),
+]
 
 # Tymczasowy globalny rozmiar danych dla tabel "duzych".
 DEFAULT_ROW_COUNT = 500
@@ -29,6 +44,9 @@ TABLE_ROW_COUNTS = {
     "UserAccountPermissions": 5,
     "BookRentalMethod": len(BOOK_RENTAL_METHODS),
     "BookShopUser": DEFAULT_ROW_COUNT,
+    "Employee": len(BOOK_SHOPS),
+    "BookShop": len(BOOK_SHOPS),
+    "BookShopOpeningHours": len(BOOK_SHOPS),
 }
 
 
@@ -53,6 +71,7 @@ def resolve_table_row_counts(
                     f"Row count for {table_name} must be greater than zero.",
                 )
             counts[table_name] = row_count
+    counts["BookShopOpeningHours"] = counts["BookShop"]
     return counts
 
 
@@ -165,6 +184,146 @@ def generate_book_shop_user_inserts(row_count: int) -> list[str]:
     return lines
 
 
+def generate_employee_inserts(row_count: int) -> list[str]:
+    """Generuje inserty dla bench.Employee.
+
+    primaryBookShopId ustawiamy tymczasowo na NULL, a po wygenerowaniu sklepow
+    dopinamy relacje blokiem UPDATE.
+    """
+    first_names = [
+        "Piotr", "Anna", "Krzysztof", "Maria", "Andrzej",
+        "Katarzyna", "Tomasz", "Malgorzata", "Pawel", "Agnieszka",
+    ]
+    surnames = [
+        "Nowak", "Kowalski", "Wisniewski", "Wojcik", "Kowalczyk",
+        "Kaminski", "Lewandowski", "Zielinski", "Szymanski", "Wozniak",
+    ]
+    roles = [
+        "Kierownik ksiegarni",
+        "Starszy bibliotekarz",
+        "Specjalista obslugi klienta",
+        "Koordynator zamowien",
+        "Opiekun czytelni",
+        "Administrator systemu",
+        "Sprzątaczka",
+        "Magazynier",
+        "Ochroniarz",
+        "Recepcjonista",
+        "Ksiegowy",
+        "Dyrektor finansowy",
+    ]
+
+    max_employees = len(BOOK_SHOPS)
+    if row_count > max_employees:
+        raise ValueError(
+            "bench.Employee obsluguje maksymalnie 10 rekordow w obecnym szkielecie.",
+        )
+
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        name = first_names[(row_id - 1) % len(first_names)]
+        surname = surnames[(row_id * 3 - 1) % len(surnames)]
+        phone_number = f"+48{500000000 + row_id:09d}"
+        email = f"pracownik.{name.lower()}.{surname.lower()}{row_id}@bench.local"
+        birth_date = f"{1975 + (row_id % 20):04d}-{((row_id % 12) + 1):02d}-{((row_id % 28) + 1):02d}"
+        started_at = f"{2015 + (row_id % 9):04d}-{((row_id % 12) + 1):02d}-01"
+        primary_role = roles[(row_id - 1) % len(roles)]
+        salary = 5200 + row_id * 450
+        lines.append(
+            "INSERT INTO bench.Employee "
+            "(id, name, surname, phoneNumber, email, birthDate, startedAt, primaryBookShopId, primaryBusinessRole, salary) "
+            f"VALUES ({row_id}, '{_sql_quote(name)}', '{_sql_quote(surname)}', "
+            f"'{_sql_quote(phone_number)}', '{_sql_quote(email)}', '{birth_date}', '{started_at}', "
+            f"NULL, '{_sql_quote(primary_role)}', {salary});"
+        )
+    return lines
+
+
+def generate_book_shop_inserts(row_count: int) -> list[str]:
+    """Generuje inserty dla bench.BookShop.
+
+    Tabela ma maksymalnie 10 rekordow inspirowanych danymi seed.
+    managerId i openingHoursId sa tymczasowo ustawiane 1:1 do id sklepu.
+    """
+    max_book_shops = len(BOOK_SHOPS)
+    if row_count > max_book_shops:
+        raise ValueError(
+            "bench.BookShop obsluguje maksymalnie 10 rekordow w obecnym szkielecie.",
+        )
+
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        shop_name, address, email = BOOK_SHOPS[row_id - 1]
+        manager_id = row_id
+        opening_hours_id = row_id
+        lines.append(
+            "INSERT INTO bench.BookShop "
+            "(id, shopName, address, email, managerId, openingHoursId) "
+            f"VALUES ({row_id}, '{_sql_quote(shop_name)}', '{_sql_quote(address)}', "
+            f"'{_sql_quote(email)}', {manager_id}, {opening_hours_id});"
+        )
+    return lines
+
+
+def generate_book_shop_opening_hours_inserts(row_count: int) -> list[str]:
+    """Generuje inserty dla bench.BookShopOpeningHours.
+
+    Liczba rekordow powinna byc rowna liczbie sklepow.
+    bookShopId jest mapowane 1:1 do id sklepu.
+    """
+    max_opening_hours = len(BOOK_SHOPS)
+    if row_count > max_opening_hours:
+        raise ValueError(
+            "bench.BookShopOpeningHours obsluguje maksymalnie 10 rekordow w obecnym szkielecie.",
+        )
+
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        saturday_open = "10:00:00"
+        saturday_close = "14:00:00"
+        sunday_open = "'11:00:00'" if row_id % 3 == 0 else "NULL"
+        sunday_close = "'15:00:00'" if row_id % 3 == 0 else "NULL"
+
+        lines.append(
+            "INSERT INTO bench.BookShopOpeningHours "
+            "(id, opensAtMonday, closesAtMonday, opensAtTuesday, closesAtTuesday, "
+            "opensAtWednesday, closesAtWednesday, opensAtThursday, closesAtThursday, "
+            "opensAtFriday, closesAtFriday, opensAtSaturday, closesAtSaturday, "
+            "opensAtSunday, closesAtSunday, bookShopId) "
+            f"VALUES ({row_id}, '09:00:00', '18:00:00', '09:00:00', '18:00:00', "
+            f"'09:00:00', '18:00:00', '09:00:00', '18:00:00', '09:00:00', '18:00:00', "
+            f"'{saturday_open}', '{saturday_close}', "
+            f"{sunday_open}, {sunday_close}, {row_id});"
+        )
+    return lines
+
+
+def generate_book_shop_opening_hours_updates(row_count: int) -> list[str]:
+    """Dopina relacje 1:1 miedzy BookShop i BookShopOpeningHours."""
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        lines.append(
+            "UPDATE bench.BookShop "
+            f"SET openingHoursId = {row_id} WHERE id = {row_id};"
+        )
+        lines.append(
+            "UPDATE bench.BookShopOpeningHours "
+            f"SET bookShopId = {row_id} WHERE id = {row_id};"
+        )
+    return lines
+
+
+def generate_employee_updates(row_count: int) -> list[str]:
+    """Dopina relacje Employee.primaryBookShopId 1:1 do sklepow."""
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        lines.append(
+            "UPDATE bench.Employee "
+            f"SET primaryBookShopId = {row_id} WHERE id = {row_id};"
+        )
+    return lines
+
+
 def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     """Buduje wspolna tresc SQL dla wszystkich wspieranych silnikow."""
     lines: list[str] = [
@@ -196,6 +355,35 @@ def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     book_shop_user_count = table_row_counts["BookShopUser"]
     lines.append(f"-- BookShopUser: {book_shop_user_count} rows")
     lines.extend(generate_book_shop_user_inserts(book_shop_user_count))
+    lines.append("")
+
+    # 5) Employee
+    employee_count = table_row_counts["Employee"]
+    lines.append(f"-- Employee: {employee_count} rows")
+    lines.extend(generate_employee_inserts(employee_count))
+    lines.append("")
+
+    # 6) BookShop
+    lines.append("-- Stage 3: tables waiting for Employee and BookShopOpeningHours generators")
+    book_shop_count = table_row_counts["BookShop"]
+    lines.append(f"-- BookShop: {book_shop_count} rows")
+    lines.extend(generate_book_shop_inserts(book_shop_count))
+    lines.append("")
+
+    # 7) BookShopOpeningHours
+    book_shop_opening_hours_count = table_row_counts["BookShopOpeningHours"]
+    lines.append(f"-- BookShopOpeningHours: {book_shop_opening_hours_count} rows")
+    lines.extend(generate_book_shop_opening_hours_inserts(book_shop_opening_hours_count))
+    lines.append("")
+
+    # 8) Synchronizacja BookShop <-> BookShopOpeningHours
+    lines.append("-- Stage 4: synchronize BookShop and BookShopOpeningHours")
+    lines.extend(generate_book_shop_opening_hours_updates(book_shop_opening_hours_count))
+    lines.append("")
+
+    # 9) Synchronizacja Employee -> BookShop
+    lines.append("-- Stage 5: synchronize Employee and BookShop")
+    lines.extend(generate_employee_updates(employee_count))
     lines.append("")
 
     return lines
