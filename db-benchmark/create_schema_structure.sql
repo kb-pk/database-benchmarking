@@ -103,7 +103,6 @@ CREATE TABLE bench.BookShopUser (
     email VARCHAR(255) NOT NULL,
     mainBookShopId INT,
     isActiveId INT NOT NULL,
-    userCardId INT NOT NULL,
 
     PRIMARY KEY (id)
 );
@@ -111,7 +110,7 @@ CREATE TABLE bench.BookShopUser (
 CREATE TABLE bench.UserCard (
     id INT NOT NULL,
     cardIdNumber CHAR(30) NOT NULL,
-    userId INT NOT NULL,
+    userId INT,
     isActiveId INT NOT NULL,
 
     PRIMARY KEY (id)
@@ -181,8 +180,6 @@ ALTER TABLE bench.BookShopUser
     ADD CONSTRAINT bookshopuser_fk1 FOREIGN KEY (mainBookShopId) REFERENCES bench.BookShop(id);
 ALTER TABLE bench.BookShopUser
     ADD CONSTRAINT bookshopuser_fk2 FOREIGN KEY (isActiveId) REFERENCES bench.ActivationStatus(id);
-ALTER TABLE bench.BookShopUser
-    ADD CONSTRAINT bookshopuser_fk3 FOREIGN KEY (userCardId) REFERENCES bench.UserCard(id);
 
 ALTER TABLE bench.UserCard
     ADD CONSTRAINT usercard_fk1 FOREIGN KEY (userId) REFERENCES bench.BookShopUser(id);
