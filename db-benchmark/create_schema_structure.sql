@@ -13,6 +13,7 @@ CREATE TABLE bench.BookShopOpeningHours (
     opensAtSaturday TIME,
     closesAtSaturday TIME,
     opensAtSunday TIME,
+    closesAtSunday TIME,
     bookShopId INT NOT NULL,
 
     PRIMARY KEY (id)
@@ -25,10 +26,11 @@ CREATE TABLE bench.Book (
     publisher VARCHAR(255),
     publishDate DATE,
     pages INT,
-    isInReadingRoom BIT NOT NULL,
+    isInReadingRoom SMALLINT NOT NULL,
     bookShopId INT NOT NULL,
 
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    CHECK (isInReadingRoom IN (0, 1))
 );
 
 CREATE TABLE bench.BookShop (
@@ -37,7 +39,7 @@ CREATE TABLE bench.BookShop (
     address VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     managerId INT NOT NULL,
-    openingHoursId INT NOT NULL,
+    openingHoursId INT,
 
     PRIMARY KEY (id)
 );
@@ -65,12 +67,13 @@ CREATE TABLE bench.BookRental(
     userId INT NOT NULL,
     employeeId INT NOT NULL,
     bookShopId INT NOT NULL,
-    isReturned BIT NOT NULL,
+    isReturned SMALLINT NOT NULL,
     startDate DATE NOT NULL,
-    endDate DATE NOT NULL,
+    endDate DATE,
     rentalMethodId INT NOT NULL,
 
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    CHECK (isReturned IN (0, 1))
 );
 
 CREATE TABLE bench.BookRentalMethod (
@@ -142,7 +145,7 @@ CREATE TABLE bench.ActivationStatus (
 );
 
 ALTER TABLE bench.BookShopOpeningHours
-    ADD CONSTRAINT bookshopopeninghours_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id);
+    ADD CONSTRAINT bookshopopeninghours_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id) DEFERRABLE INITIALLY DEFERRED;
 
 ALTER TABLE bench.Book
     ADD CONSTRAINT book_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id);
@@ -150,7 +153,7 @@ ALTER TABLE bench.Book
 ALTER TABLE bench.BookShop
     ADD CONSTRAINT bookshop_fk1 FOREIGN KEY (managerId) REFERENCES bench.Employee(id);
 ALTER TABLE bench.BookShop
-    ADD CONSTRAINT bookshop_fk2 FOREIGN KEY (openingHoursId) REFERENCES bench.BookShopOpeningHours(id);
+    ADD CONSTRAINT bookshop_fk2 FOREIGN KEY (openingHoursId) REFERENCES bench.BookShopOpeningHours(id) DEFERRABLE INITIALLY DEFERRED;
 
 ALTER TABLE bench.BookShopOffering
     ADD CONSTRAINT bookshopoffering_fk1 FOREIGN KEY (bookId) REFERENCES bench.Book(id);
