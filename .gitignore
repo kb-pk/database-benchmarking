@@ -1,2 +1,10 @@
 generated_sql/
 __pycache__/
+
+# java & intellij
+target/
+out/
+.idea/
+
+# docker
+.env
