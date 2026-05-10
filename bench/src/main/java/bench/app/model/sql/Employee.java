@@ -11,7 +11,7 @@ public class Employee implements ConvertibleTo<bench.app.model.common.Employee> 
     @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
-    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private BookShop primaryBookShop;
 
     private String name;

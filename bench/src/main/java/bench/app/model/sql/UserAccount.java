@@ -11,7 +11,7 @@ public class UserAccount implements ConvertibleTo<bench.app.model.common.UserAcc
 
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private User user;
-    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private UserAccountPermissions userAccountPermissions;
 
     private String login;

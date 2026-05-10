@@ -13,7 +13,7 @@ public class BookReservation implements ConvertibleTo<bench.app.model.common.Boo
 
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private Book book;
-    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private User user;
 
     private Date whenReserved;

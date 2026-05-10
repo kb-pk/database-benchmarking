@@ -11,7 +11,7 @@ public class UserCard implements ConvertibleTo<bench.app.model.common.UserCard> 
 
     @OneToOne(cascade = CascadeType.ALL)
     private User user;
-    @OneToMany(cascade = CascadeType.ALL)
+    @ManyToOne(cascade = CascadeType.ALL)
     private UserActivationStatus activationStatus;
 
     private String cardId;

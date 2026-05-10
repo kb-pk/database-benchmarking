@@ -4,14 +4,16 @@ import bench.app.model.common.ConvertibleTo;
 import jakarta.persistence.*;
 
 @Entity
+// conflicts with user
+@Table(name = "users")
 public class User implements ConvertibleTo<bench.app.model.common.User> {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
-    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private BookShop mainBookShop;
-    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private UserActivationStatus activationStatus;
 
     private String name;
