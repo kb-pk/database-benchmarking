@@ -93,7 +93,6 @@ CREATE TABLE bench.Employee (
     startedAt DATE,
     primaryBookShopId INT,
     primaryBusinessRole VARCHAR(255),
-    salary DECIMAL NOT NULL,
 
     PRIMARY KEY (id)
 );
