@@ -1,7 +1,10 @@
 package bench.model.sql;
 
 import bench.model.common.ConvertibleTo;
-import jakarta.persistence.*;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
 
 @Entity
 public class RentalMethod implements ConvertibleTo<bench.model.common.RentalMethod> {
