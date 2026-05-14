@@ -91,12 +91,6 @@ psql -h 127.0.0.1 -U postgres -d postgres -f schema/sql/create_schema_structure.
 @testtest123A
 ```
 
-Jesli nie chcesz instalowac klienta lokalnie, mozesz uzyc `psql` z kontenera:
-
-```bash
-docker exec -it postgres psql -U postgres -d postgres
-```
-
 5. Uruchom aplikacje Java:
 
 ```bash
@@ -104,10 +98,39 @@ cd bench
 mvn spring-boot:run
 ```
 
+Opcjonalnie: uruchomienie z automatycznym czyszczeniem wszystkich tabel schematu `bench`
+i zaladowaniem wskazanego pliku z `generated_sql`:
+
+```bash
+cd bench
+mvn spring-boot:run -Dspring-boot.run.arguments="--bench.load-sql=inserts_postgresql_250000.sql"
+```
+
+Kolejnosc dzialania przy tych argumentach:
+
+1. TRUNCATE wszystkich tabel z `bench` (z `CASCADE`),
+2. zaladowanie wskazanego pliku SQL,
+3. start aplikacji.
+
+Pliki logow CSV CRUD sa zapisywane w katalogu `bench/` jako:
+
+- `postgresql_1000_create.csv`
+- `postgresql_1000_read.csv`
+- `postgresql_1000_update.csv`
+- `postgresql_1000_delete.csv`
+
+Uwaga: sposob uruchamiania aplikacji nie zmienil sie.
+
 6. Sprawdz endpoint healthcheck:
 
 ```bash
 curl http://localhost:8080/healthcheck
+```
+
+7. Zatrzymaj aplikacje dzialajaca na porcie 8080:
+
+```bash
+kill $(ss -lptn 'sport = :8080' | awk -F'pid=' 'NR>1{print $2}' | awk -F',' '{print $1}')
 ```
 
 ### Szybki start Cassandra
@@ -116,11 +139,7 @@ curl http://localhost:8080/healthcheck
 
 	docker compose -f compose.yaml up -d cassandra
 
-2. Poczekaj az kontener bedzie gotowy (w logach powinno byc Startup complete):
-
-	docker logs -f cassandra
-
-3. Zaladuj schemat CQL:
+2. Zaladuj schemat CQL:
 
 	docker exec -i cassandra cqlsh < schema/widecolumn/create_schema.cql
 
