@@ -1,18 +1,21 @@
 package bench.app.model.sql;
 
 import bench.app.model.common.ConvertibleTo;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 @Entity
+@Table(schema = "bench", name = "useraccountpermissions")
 public class UserAccountPermissions implements ConvertibleTo<bench.app.model.common.UserAccountPermissions> {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @Column(name = "id", nullable = false)
     private int id;
 
+    @Column(name = "permission", nullable = false)
     private String permission;
+    @Column(name = "details")
     private String details;
 
     @Override

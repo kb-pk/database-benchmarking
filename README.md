@@ -1,19 +1,141 @@
-Link do UML: https://lucid.app/lucidchart/87988d5e-6ca7-449b-be75-491117a453e3/edit?viewport_loc=351%2C48%2C2175%2C1087%2C0_0&invitationId=inv_b0529357-1922-4cad-b745-aa6f6c0f57ab 
+Link do UML: https://lucid.app/lucidchart/87988d5e-6ca7-449b-be75-491117a453e3/edit?viewport_loc=351%2C48%2C2175%2C1087%2C0_0&invitationId=inv_b0529357-1922-4cad-b745-aa6f6c0f57ab
 
-## Generowanie danych
+## Generowanie danych (generate_inserts)
 
-Aktualny generator danych jest w pliku `data_generator/generate_inserts.py`.
+Aktualny generator danych znajduje sie w pliku `data_generator/generate_inserts.py`.
 
-Podstawowe uruchomienie
+Preferowane uruchomienie (nowy parametr):
 
 ```bash
-python3 data_generator/generate_inserts.py -size 500000 -engine postgresql
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine postgresql
 ```
 
-Po wykonaniu komendy plik wynikowy pojawi sie w katalogu `generated_sql/`.
+Tryb legacy (nadal wspierany):
+
+```bash
+python3 data_generator/generate_inserts.py -size 1 -engine postgresql
+```
+
+Plik wynikowy pojawi sie w katalogu `generated_sql/` (lub wskazanym przez `-output-dir`).
 
 ### Dostepne parametry
 
-- `-size` - wymagany parametr techniczny uruchomienia (np. `500000`)
-- `-engine` - wymagany silnik: `postgresql|mssql|cassandra|scylla`
-- `-output-dir` - opcjonalny katalog wyjsciowy (domyslnie `generated_sql`)
+- `-engine` (wymagany): `postgresql|mssql|cassandra|scylla`
+- `-total-rows` (zalecany): calkowita liczba rekordow do wygenerowania
+- `-size` (legacy): preset rozmiaru (`1|2|3|4`), gdzie:
+	`1=500000`, `2=1000000`, `3=5000000`, `4=10000000`
+- `-output-dir` (opcjonalny): katalog wyjsciowy, domyslnie `generated_sql`
+
+Uwagi:
+
+- Musi byc podany przynajmniej jeden z parametrow: `-total-rows` albo `-size`.
+- Jesli podasz oba, generator uzyje `-total-rows`.
+- Dla `postgresql` i `mssql` generowany jest plik `.sql`.
+- Dla `cassandra` i `scylla` generowany jest plik `.cql`.
+
+Przyklady:
+
+```bash
+# PostgreSQL SQL
+python3 data_generator/generate_inserts.py -total-rows 1000000 -engine postgresql
+
+# MSSQL SQL
+python3 data_generator/generate_inserts.py -size 1 -engine mssql
+
+# Cassandra CQL
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine cassandra
+
+# Wlasny katalog wyjsciowy
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine scylla -output-dir out
+```
+
+## Uruchamianie kodu Java (Spring Boot)
+
+Modul Java znajduje sie w katalogu `bench/` (Maven + Spring Boot).
+
+### Wymagania
+
+- Java 21
+- Maven 3.9+
+- (opcjonalnie) Docker + Docker Compose do uruchomienia baz
+
+
+### Szybki start PostgreSQL
+
+Haslo do lokalnego PostgreSQL ustawione w projekcie to: `@testtest123A`.
+
+1. Wystartuj PostgreSQL z Compose:
+
+```bash
+export POSTGRES_PWD='@testtest123A'
+docker compose -f compose.yaml up -d postgres
+```
+
+2. Zainstaluj klienta `psql`, jesli go nie masz:
+
+```bash
+sudo apt update
+sudo apt install postgresql-client
+```
+
+3. Wgraj schemat do bazy:
+
+```bash
+psql -h 127.0.0.1 -U postgres -d postgres -f schema/sql/create_schema.sql
+psql -h 127.0.0.1 -U postgres -d postgres -f schema/sql/create_schema_structure.sql
+```
+
+4. W razie pytania podaj haslo:
+
+```text
+@testtest123A
+```
+
+Jesli nie chcesz instalowac klienta lokalnie, mozesz uzyc `psql` z kontenera:
+
+```bash
+docker exec -it postgres psql -U postgres -d postgres
+```
+
+5. Uruchom aplikacje Java:
+
+```bash
+cd bench
+mvn spring-boot:run
+```
+
+6. Sprawdz endpoint healthcheck:
+
+```bash
+curl http://localhost:8080/healthcheck
+```
+
+### Szybki start Cassandra
+
+1. Uruchom Cassandra:
+
+	docker compose -f compose.yaml up -d cassandra
+
+2. Poczekaj az kontener bedzie gotowy (w logach powinno byc Startup complete):
+
+	docker logs -f cassandra
+
+3. Zaladuj schemat CQL:
+
+	docker exec -i cassandra cqlsh < schema/widecolumn/create_schema.cql
+
+Wazne: nie podawaj pliku jako argument po cqlsh, bo wtedy cqlsh traktuje to jako hostname i zwraca blad Name or service not known.
+
+### Build i testy (Java)
+
+```bash
+cd bench
+mvn clean package
+mvn test
+```
+
+### Stan API Java
+
+- Endpoint `GET /healthcheck` dziala i zwraca status aplikacji.
+- Endpointy `BookShopController` sa w trakcie implementacji (serwisy aktualnie rzucaja `UnsupportedOperationException`).
+- W `application.yaml` skonfigurowane sa jednoczesnie ustawienia PostgreSQL i Cassandra. Do pelnych testow endpointow SQL/NoSQL potrzebne sa odpowiednie bazy i kompletna implementacja serwisow.

@@ -6,16 +6,21 @@ import jakarta.persistence.*;
 import java.util.Date;
 
 @Entity
+@Table(schema = "bench", name = "bookreservation")
 public class BookReservation implements ConvertibleTo<bench.app.model.common.BookReservation> {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @Column(name = "id", nullable = false)
     private int id;
 
-    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JoinColumn(name = "bookid", nullable = false)
     private Book book;
     @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JoinColumn(name = "userid", nullable = false)
     private User user;
 
+    @Temporal(TemporalType.DATE)
+    @Column(name = "whenreserved", nullable = false)
     private Date whenReserved;
 
     @Override

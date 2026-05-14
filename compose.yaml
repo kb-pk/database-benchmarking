@@ -1,43 +1,45 @@
 services:
-#  mssql:
- #   image: mcr.microsoft.com/mssql/server:2025-latest
-  #  restart: unless-stopped
-   # container_name: mssql
-    #environment:
-     # ACCEPT_EULA: "y"
-      #MSSQL_PID: "EnterpriseDeveloper"
-      
-#      MSSQL_SA_PASSWORD: "${MSSQL_SA_PWD:?}"
- #   networks:
-  #    - mssql
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    restart: unless-stopped
+    container_name: mssql
+    environment:
+      ACCEPT_EULA: "y"
+      MSSQL_PID: "EnterpriseDeveloper"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PWD:-YourStrong!Passw0rd}"
+    networks:
+      - mssql
 
   postgres:
     image: postgres:18.3
     restart: unless-stopped
-    container_name: "postgres"
+    container_name: postgres
     environment:
       POSTGRES_USER: "postgres"
-      POSTGRES_PASSWORD: "${POSTGRES_PWD:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PWD:-@testtest123A}"
       POSTGRES_DB: "postgres"
     ports:
       - "127.0.0.1:5432:5432"
     networks:
       - postgres
 
-#  cassandra:
-#    image: cassandra:5.0.6
-#    restart: unless-stopped
-#    container_name: "cassandra"
-#    networks:
-#      - cassandra
+  cassandra:
+    image: cassandra:5.0.6
+    restart: unless-stopped
+    container_name: cassandra
+    ports:
+      - "127.0.0.1:9042:9042"
+    networks:
+      - cassandra
 
-#  scylla:
- #   image: scylladb/scylla:2025.3
-  #  restart: unless-stopped
-   # container_name: "scylladb"
-    #networks:
-     # - scylla
-
+  scylla:
+    image: scylladb/scylla:2025.3
+    restart: unless-stopped
+    container_name: scylladb
+    ports:
+      - "127.0.0.1:9043:9042"
+    networks:
+      - scylla
 
 networks:
   mssql:
@@ -45,10 +47,7 @@ networks:
     internal: true
   postgres:
     name: postgres
-#    internal: true
   cassandra:
     name: cassandra
-    internal: true
   scylla:
     name: scylla
-    internal: true

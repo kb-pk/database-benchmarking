@@ -38,7 +38,7 @@ ENGINE_FAMILIES = {
 }
 
 
-SIZE_CHOICES = sorted(DATASET_OPTIONS.values())
+SIZE_CHOICES = sorted(int(key) for key in DATASET_OPTIONS)
 ENGINE_CHOICES = tuple(ENGINE_OPTIONS.values())
 
 
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         required=False,
         choices=SIZE_CHOICES,
-        help="Rozmiar zbioru danych (PRZESTARZAŁE - użyj -total-rows).",
+        help="Preset rozmiaru danych: 1=500k, 2=1M, 3=5M, 4=10M (PRZESTARZAŁE - użyj -total-rows).",
     )
     parser.add_argument(
         "-total-rows",
@@ -84,6 +84,10 @@ def main() -> None:
     if args.total_rows is None and args.size is None:
         print("ERROR: Musisz podać -total-rows lub -size")
         return
+
+    if args.total_rows is not None and args.total_rows <= 0:
+        print("ERROR: -total-rows musi byc > 0")
+        return
     
     if args.total_rows is not None and args.size is not None:
         print("WARNING: Obie flagi (-total-rows i -size) podane. Usunę -size i użyję -total-rows")
@@ -97,9 +101,10 @@ def main() -> None:
         dataset_size_for_output = args.total_rows
         use_total_rows = True
     else:
+        resolved_size = DATASET_OPTIONS[str(args.size)]
         print("\nWybrane parametry:")
-        print(f"- Rozmiar zbioru: {args.size}")
-        dataset_size_for_output = args.size
+        print(f"- Preset rozmiaru: {args.size} -> {resolved_size}")
+        dataset_size_for_output = resolved_size
         use_total_rows = False
     
     print(f"- Silnik: {args.engine}")
@@ -111,7 +116,7 @@ def main() -> None:
         if use_total_rows:
             generated_content = generate_relational_sql(args.size or 0, None, args.total_rows)
         else:
-            generated_content = generate_relational_sql(args.size, None)
+            generated_content = generate_relational_sql(dataset_size_for_output, None)
         file_extension = "sql"
     elif engine_family == "cassandra":
         generated_content = generate_cassandra_cql(dataset_size_for_output, None)
@@ -125,10 +130,7 @@ def main() -> None:
     output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.{file_extension}"
     output_path.write_text(generated_content, encoding="utf-8")
     print(f"- Plik wynikowy: {output_path}")
-    
-    print("\nSzkielet generatora zostal uruchomiony poprawnie.")
 
-    print(f"- Plik wynikowy: {output_path}")
     print("\nSzkielet generatora zostal uruchomiony poprawnie.")
 
 

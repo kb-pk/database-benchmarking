@@ -1,35 +1,54 @@
 package bench.app.model.cassandra;
 
 import org.springframework.data.cassandra.core.mapping.PrimaryKey;
+import org.springframework.data.cassandra.core.mapping.Column;
 import org.springframework.data.cassandra.core.mapping.Table;
 
-import java.sql.Time;
+import java.time.LocalTime;
 import java.util.UUID;
 
-@Table("bookshop")
+@Table("bookshops")
 public class BookShop {
-    @PrimaryKey
-    private UUID id;
+    @PrimaryKey("shop_id")
+    private UUID shopId;
 
-    private Employee manager;
+    @Column("manager_id")
+    private UUID managerId;
 
+    @Column("shop_name")
     private String shopName;
+    @Column("address")
     private String address;
+    @Column("email")
     private String email;
 
-    private Time opensAtMonday;
-    private Time opensAtTuesday;
-    private Time opensAtWednesday;
-    private Time opensAtThursday;
-    private Time opensAtFriday;
-    private Time opensAtSaturday;
-    private Time opensAtSunday;
+    @Column("opens_at_monday")
+    private LocalTime opensAtMonday;
+    @Column("opens_at_tuesday")
+    private LocalTime opensAtTuesday;
+    @Column("opens_at_wednesday")
+    private LocalTime opensAtWednesday;
+    @Column("opens_at_thursday")
+    private LocalTime opensAtThursday;
+    @Column("opens_at_friday")
+    private LocalTime opensAtFriday;
+    @Column("opens_at_saturday")
+    private LocalTime opensAtSaturday;
+    @Column("opens_at_sunday")
+    private LocalTime opensAtSunday;
 
-    private Time closesAtMonday;
-    private Time closesAtTuesday;
-    private Time closesAtWednesday;
-    private Time closesAtThursday;
-    private Time closesAtFriday;
-    private Time closesAtSaturday;
-    private Time closesAtSunday;
+    @Column("closes_at_monday")
+    private LocalTime closesAtMonday;
+    @Column("closes_at_tuesday")
+    private LocalTime closesAtTuesday;
+    @Column("closes_at_wednesday")
+    private LocalTime closesAtWednesday;
+    @Column("closes_at_thursday")
+    private LocalTime closesAtThursday;
+    @Column("closes_at_friday")
+    private LocalTime closesAtFriday;
+    @Column("closes_at_saturday")
+    private LocalTime closesAtSaturday;
+    @Column("closes_at_sunday")
+    private LocalTime closesAtSunday;
 }
