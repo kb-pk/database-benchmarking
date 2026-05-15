@@ -24,6 +24,39 @@ public class UserController {
 		return userPermissionCrudOperations.create(request.id(), request.permission(), request.details());
 	}
 
+	@PostMapping("/sql/book-rental-methods")
+	public Map<String, Object> createBookRentalMethod(@RequestBody CreateBookRentalMethodRequest request) {
+		return userPermissionCrudOperations.createRentalMethod(request.id(), request.method());
+	}
+
+	@PostMapping("/sql/bookshops")
+	public Map<String, Object> createBookShop(@RequestBody CreateBookShopRequest request) {
+		return userPermissionCrudOperations.createBookShop(
+				request.id(),
+				request.shopName(),
+				request.address(),
+				request.email(),
+				request.managerId()
+		);
+	}
+
+	@PostMapping("/sql/users")
+	public Map<String, Object> createUserRegistration(@RequestBody CreateUserRegistrationRequest request) {
+		return userPermissionCrudOperations.createUserRegistration(
+				request.id(),
+				request.name(),
+				request.surname(),
+				request.phoneNumber(),
+				request.email(),
+				request.login(),
+				request.passwordHash(),
+				request.cardIdNumber(),
+				request.activationStatusId(),
+				request.permissionId(),
+				request.mainBookShopId()
+		);
+	}
+
 	@GetMapping("/sql/user-account-permissions/{id}")
 	public Map<String, Object> getUserAccountPermission(@PathVariable int id) {
 		return userPermissionCrudOperations.read(id);
@@ -43,6 +76,27 @@ public class UserController {
 	}
 
 	public record CreateUserAccountPermissionRequest(Integer id, String permission, String details) {
+	}
+
+	public record CreateBookRentalMethodRequest(Integer id, String method) {
+	}
+
+	public record CreateBookShopRequest(Integer id, String shopName, String address, String email, Integer managerId) {
+	}
+
+	public record CreateUserRegistrationRequest(
+			Integer id,
+			String name,
+			String surname,
+			String phoneNumber,
+			String email,
+			String login,
+			String passwordHash,
+			String cardIdNumber,
+			Integer activationStatusId,
+			Integer permissionId,
+			Integer mainBookShopId
+	) {
 	}
 
 	public record UpdateUserAccountPermissionRequest(String permission, String details) {

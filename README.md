@@ -42,13 +42,7 @@ mvn clean package -DskipTests
 
 2. Uruchom aplikacje Java za pomoca JAR:
 
-```bash
-cd bench
-java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=postgresql
-```
-
-Opcjonalnie: uruchomienie z automatycznym czyszczeniem wszystkich tabel schematu `bench`
-i zaladowaniem wskazanego pliku z `generated_sql`:
+Uruchomienie z automatycznym czyszczeniem wszystkich tabel schematu `bench` i zaladowaniem wskazanego pliku z `generated_sql`:
 
 ```bash
 cd bench
@@ -57,8 +51,9 @@ java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=postgresql --bench.load-s
 
 Kolejnosc dzialania przy tych argumentach:
 
-Pliki logow CSV CRUD sa zapisywane w katalogu `bench/`
-Nazwa pliku CSV uzaleznia sie od rozmiaru datasetu wziacieteqo z `bench.load-sql`.
+Pliki logow CSV CRUD sa zapisywane w katalogu `../output_data/{engine}/`
+Nazwa pliku CSV uzaleznia sie od rozmiaru datasetu wziateqo z `bench.load-sql`.
+Po zaladowaniu danych aplikacja automatycznie uruchamia benchmark CREATE (wszystkie 9 operacji) i zapisuje wyniki do plikow CSV.
 
 
 3. Sprawdz endpoint healthcheck:
@@ -102,10 +97,14 @@ Implementacja nowego wzorca z ujednoliconym interfejsem CRUD, routerem silnika i
 - Nowe silniki mozna dopiacz przez implementacje `UserPermissionCrudEngineService` bez zmiany kontrolera
 
 **Obsługiwane operacje:**
-- CREATE: 3 inserty z pojedynczymi pomiarami + srednia -> CSV
-- READ: pojedynczy pomiar -> CSV
-- UPDATE: pojedynczy pomiar -> CSV
-- DELETE: pojedynczy pomiar -> CSV
+- CREATE 1-9: Operacje tworzenia w bazie (każda z 3 powtórzeniami + średnia) -> CSV
+  - CREATE 1-6: Podstawowe operacje insert na różne tabele
+  - CREATE 7: Rental z pełnym kontekstem - rejestruje wypożyczenie z rezolucją 5 kluczy obcych (book, user, employee, shop, rental method)
+  - CREATE 8: Rental warunkowy - szuka aktywnego użytkownika z książką w jego sklepie, fallback na każdego użytkownika
+  - CREATE 9: Batch supply event - wstawia wiele książek w jednej operacji (domyślnie 5 książek × 3 powtórzenia = 15 książek)
+- READ: Pojedynczy pomiar -> CSV
+- UPDATE: Pojedynczy pomiar -> CSV
+- DELETE: Pojedynczy pomiar -> CSV
 
 #### Inne endpointy
 

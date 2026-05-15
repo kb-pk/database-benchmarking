@@ -5,6 +5,9 @@ import org.apache.commons.csv.CSVPrinter;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
@@ -18,7 +21,12 @@ public class CsvCrudLogger {
     private final Map<CrudType, CSVPrinter> printers = new EnumMap<>(CrudType.class);
 
     public CsvCrudLogger(String engine, String size) throws IOException {
-        this.fileBaseName = engine + "_" + size;
+        // Mapuj engine name na folder
+        String folderName = mapEngineToPreciseFolder(engine);
+        Path outputDir = Paths.get("../output_data", folderName);
+        Files.createDirectories(outputDir);
+        
+        this.fileBaseName = outputDir.resolve(engine + "_" + size).toString();
         for (CrudType type : CrudType.values()) {
             FileWriter writer = new FileWriter(this.fileBaseName + "_" + type.name().toLowerCase() + ".csv", true);
             CSVFormat format;
@@ -60,6 +68,17 @@ public class CsvCrudLogger {
     private String formatDurationMs(Instant start, Instant end) {
         double durationMs = Duration.between(start, end).toNanos() / 1_000_000.0;
         return String.format(Locale.US, "%.4f", durationMs);
+    }
+
+    private String mapEngineToPreciseFolder(String engine) {
+        // Mapuj engine names na folder names w output_data
+        return switch (engine.toLowerCase()) {
+            case "postgresql" -> "postgre";
+            case "mssql" -> "mssql";
+            case "cassandra" -> "cassandra";
+            case "scylla" -> "scylla";
+            default -> engine;
+        };
     }
 
     public void close() throws IOException {

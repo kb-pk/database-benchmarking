@@ -3,6 +3,8 @@ services:
     image: mcr.microsoft.com/mssql/server:2025-latest
     restart: unless-stopped
     container_name: mssql
+    ports:
+      - "127.0.0.1:1433:1433"
     environment:
       ACCEPT_EULA: "y"
       MSSQL_PID: "EnterpriseDeveloper"
@@ -44,7 +46,6 @@ services:
 networks:
   mssql:
     name: mssql
-    internal: true
   postgres:
     name: postgres
   cassandra:
