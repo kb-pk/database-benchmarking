@@ -1,5 +1,3 @@
-Link do UML: https://lucid.app/lucidchart/87988d5e-6ca7-449b-be75-491117a453e3/edit?viewport_loc=351%2C48%2C2175%2C1087%2C0_0&invitationId=inv_b0529357-1922-4cad-b745-aa6f6c0f57ab
-
 ## Generowanie danych (generate_inserts)
 
 Aktualny generator danych znajduje sie w pliku `data_generator/generate_inserts.py`.
@@ -8,12 +6,6 @@ Preferowane uruchomienie (nowy parametr):
 
 ```bash
 python3 data_generator/generate_inserts.py -total-rows 500000 -engine postgresql
-```
-
-Tryb legacy (nadal wspierany):
-
-```bash
-python3 data_generator/generate_inserts.py -size 1 -engine postgresql
 ```
 
 Plik wynikowy pojawi sie w katalogu `generated_sql/` (lub wskazanym przez `-output-dir`).
@@ -26,28 +18,6 @@ Plik wynikowy pojawi sie w katalogu `generated_sql/` (lub wskazanym przez `-outp
 	`1=500000`, `2=1000000`, `3=5000000`, `4=10000000`
 - `-output-dir` (opcjonalny): katalog wyjsciowy, domyslnie `generated_sql`
 
-Uwagi:
-
-- Musi byc podany przynajmniej jeden z parametrow: `-total-rows` albo `-size`.
-- Jesli podasz oba, generator uzyje `-total-rows`.
-- Dla `postgresql` i `mssql` generowany jest plik `.sql`.
-- Dla `cassandra` i `scylla` generowany jest plik `.cql`.
-
-Przyklady:
-
-```bash
-# PostgreSQL SQL
-python3 data_generator/generate_inserts.py -total-rows 1000000 -engine postgresql
-
-# MSSQL SQL
-python3 data_generator/generate_inserts.py -size 1 -engine mssql
-
-# Cassandra CQL
-python3 data_generator/generate_inserts.py -total-rows 500000 -engine cassandra
-
-# Wlasny katalog wyjsciowy
-python3 data_generator/generate_inserts.py -total-rows 500000 -engine scylla -output-dir out
-```
 
 ## Uruchamianie kodu Java (Spring Boot)
 
@@ -91,11 +61,18 @@ psql -h 127.0.0.1 -U postgres -d postgres -f schema/sql/create_schema_structure.
 @testtest123A
 ```
 
-5. Uruchom aplikacje Java:
+5. Zbuduj aplikacje Java:
 
 ```bash
 cd bench
-mvn spring-boot:run
+mvn clean package -DskipTests
+```
+
+6. Uruchom aplikacje Java za pomoca JAR:
+
+```bash
+cd bench
+java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=postgresql
 ```
 
 Opcjonalnie: uruchomienie z automatycznym czyszczeniem wszystkich tabel schematu `bench`
@@ -103,34 +80,141 @@ i zaladowaniem wskazanego pliku z `generated_sql`:
 
 ```bash
 cd bench
-mvn spring-boot:run -Dspring-boot.run.arguments="--bench.load-sql=inserts_postgresql_250000.sql"
+java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=postgresql --bench.load-sql=inserts_postgresql_250000.sql
 ```
 
 Kolejnosc dzialania przy tych argumentach:
 
-1. TRUNCATE wszystkich tabel z `bench` (z `CASCADE`),
-2. zaladowanie wskazanego pliku SQL,
-3. start aplikacji.
+1. Rezolucja silnika bazodanowego (bench.engine),
+2. TRUNCATE wszystkich tabel z `bench` (z `CASCADE`),
+3. zaladowanie wskazanego pliku SQL,
+4. start aplikacji.
 
 Pliki logow CSV CRUD sa zapisywane w katalogu `bench/` jako:
 
-- `postgresql_1000_create.csv`
-- `postgresql_1000_read.csv`
-- `postgresql_1000_update.csv`
-- `postgresql_1000_delete.csv`
+- `postgresql_10000_create.csv`
+- `postgresql_10000_read.csv`
+- `postgresql_10000_update.csv`
+- `postgresql_10000_delete.csv`
 
-Uwaga: sposob uruchamiania aplikacji nie zmienil sie.
+Nazwa pliku CSV uzaleznia sie od rozmiaru datasetu wziacieteqo z `bench.load-sql`.
 
-6. Sprawdz endpoint healthcheck:
+### Dostepne endpointy API - User Account Permissions CRUD
+
+Wszystkie operacje sa dedykowane tabelce `bench.useraccountpermissions` i sa dostepne dla PostgreSQL i MSSQL.
+Logowanie do CSV dziala automatycznie.
+
+#### POST /sql/user-account-permissions
+Tworzy 3 rekordy (3 inserty z rownoleglem pomiarem czasowym). Srednia z 3 pomiarow jest zapisywana do `*_create.csv`.
+
+```bash
+curl -X POST http://localhost:8080/sql/user-account-permissions \
+  -H "Content-Type: application/json" \
+  -d '{"permission":"ADMIN","details":"test benchmark"}'
+```
+
+Odpowiedz:
+```json
+{
+  "status": "created",
+  "engine": "postgresql",
+  "executions": 3,
+  "ids": [1, 2, 3],
+  "average_duration_ms": "2.6308",
+  "permission": "ADMIN"
+}
+```
+
+#### GET /sql/user-account-permissions/{id}
+Odczytuje rekord o podanym ID. Pomiar czasu zapisywany do `*_read.csv`.
+
+```bash
+curl http://localhost:8080/sql/user-account-permissions/1
+```
+
+Odpowiedz:
+```json
+{
+  "status": "read",
+  "engine": "postgresql",
+  "data": {
+    "id": 1,
+    "permission": "ADMIN",
+    "details": "test benchmark"
+  }
+}
+```
+
+#### PUT /sql/user-account-permissions/{id}
+Aktualizuje rekord o podanym ID. Pomiar czasu zapisywany do `*_update.csv`.
+
+```bash
+curl -X PUT http://localhost:8080/sql/user-account-permissions/1 \
+  -H "Content-Type: application/json" \
+  -d '{"permission":"USER","details":"updated"}'
+```
+
+Odpowiedz:
+```json
+{
+  "status": "updated",
+  "engine": "postgresql",
+  "id": 1,
+  "permission": "USER",
+  "details": "updated"
+}
+```
+
+#### DELETE /sql/user-account-permissions/{id}
+Usuwa rekord o podanym ID. Pomiar czasu zapisywany do `*_delete.csv`.
+
+```bash
+curl -X DELETE http://localhost:8080/sql/user-account-permissions/1
+```
+
+Odpowiedz:
+```json
+{
+  "status": "deleted",
+  "engine": "postgresql",
+  "id": 1
+}
+```
+
+7. Sprawdz endpoint healthcheck:
 
 ```bash
 curl http://localhost:8080/healthcheck
 ```
 
-7. Zatrzymaj aplikacje dzialajaca na porcie 8080:
+8. Zatrzymaj aplikacje dzialajaca na porcie 8080:
 
 ```bash
 kill $(ss -lptn 'sport = :8080' | awk -F'pid=' 'NR>1{print $2}' | awk -F',' '{print $1}')
+```
+
+### Parametry aplikacji Java
+
+Przy uruchamianiu aplikacji dostepne sa nastepujace parametry:
+
+- `--bench.engine` (opcjonalny): `postgresql|mssql|cassandra|scylla`. Jesli nie podasz, aplikacja sprobuje wyodrebnic silnik z nazwy pliku `bench.load-sql`. Domyslnie PostgreSQL.
+- `--bench.load-sql` (opcjonalny): nazwa lub sciezka do pliku SQL/CQL. Przy starcie dane zostan zaladowane do bazy (ze wcześniejszym TRUNCATE).
+- Standardowe parametry Spring Boot: `--server.port=8080` itp.
+
+Przyklady:
+
+```bash
+# Startuje na PostgreSQL (domyslnie)
+java -jar target/app-0.0.1-SNAPSHOT.jar
+
+# Startuje na PostgreSQL z zaladowaniem danych
+java -jar target/app-0.0.1-SNAPSHOT.jar --bench.load-sql=inserts_postgresql_250000.sql
+
+# Startuje na MSSQL z zaladowaniem danych
+java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=mssql --bench.load-sql=inserts_mssql_250000.sql
+
+# Startuje na Cassandra (bez danych - CRUD nie jest jeszcze zaimplementowany dla NoSQL)
+java -jar target/app-0.0.1-SNAPSHOT.jar --bench.engine=cassandra
 ```
 
 ### Szybki start Cassandra
@@ -154,6 +238,32 @@ mvn test
 ```
 
 ### Stan API Java
+
+#### Architektura CRUD dla User Account Permissions
+
+Implementacja nowego wzorca z ujednoliconym interfejsem CRUD, routerem silnika i katalogiem predefiniowanych zapytan:
+
+- `UserPermissionCrudOperations` - unifikowany interfejs CRUD (create/read/update/delete)
+- `UserPermissionCrudEngineService` - interfejs implementacji per silnik
+- `BenchmarkEngineResolver` - rezolucja silnika na podstawie `bench.engine` lub `bench.load-sql`
+- `UserPermissionQueryCatalog` - slownik predefiniowanych zapytan SQL per silnik i operacje
+- `JdbcUserPermissionCrudService` - implementacja dla PostgreSQL i MSSQL (JDBC)
+- `WideColumnUserPermissionCrudService` - punkt rozszerzenia dla Cassandra i Scylla (placeholder)
+- `UserPermissionCrudServiceRouter` - router wybierajacy implementacje na podstawie resolwera silnika
+
+**Zalety tego podejscia:**
+- Wybor silnika odbywa sie raz przy starcie, bez ifow w kontrolerze
+- Logika SQL jest oddzielona per silnik
+- Logowanie CSV dziala na wszystkich operacjach (create z 3 powtorzeniami, read/update/delete pojedyncze pomiary)
+- Nowe silniki mozna dopiacz przez implementacje `UserPermissionCrudEngineService` bez zmiany kontrolera
+
+**Obsługiwane operacje:**
+- CREATE: 3 inserty z pojedynczymi pomiarami + srednia -> CSV
+- READ: pojedynczy pomiar -> CSV
+- UPDATE: pojedynczy pomiar -> CSV
+- DELETE: pojedynczy pomiar -> CSV
+
+#### Inne endpointy
 
 - Endpoint `GET /healthcheck` dziala i zwraca status aplikacji.
 - Endpointy `BookShopController` sa w trakcie implementacji (serwisy aktualnie rzucaja `UnsupportedOperationException`).

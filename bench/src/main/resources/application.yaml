@@ -17,3 +17,6 @@ spring:
     keyspace-name: bench_bookshop
     local-datacenter: datacenter1
     schema-action: create-if-not-exists
+
+bench:
+  engine: postgresql
