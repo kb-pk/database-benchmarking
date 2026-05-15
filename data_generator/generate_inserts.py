@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 
-"""Szkielet generatora insertow dla benchmarkow bazy danych.
-
-Ten plik na razie tylko zbiera parametry uruchomienia z flag CLI:
-- rozmiar zbioru danych,
-- typ silnika.
-"""
+"""Generator insertow dla benchmarkow bazy danych."""
 
 from __future__ import annotations
 
@@ -45,7 +40,7 @@ ENGINE_CHOICES = tuple(ENGINE_OPTIONS.values())
 def parse_args() -> argparse.Namespace:
     """Parsuje argumenty przekazane w linii polecen."""
     parser = argparse.ArgumentParser(
-        description="Generator insertow (szkielet) - wybor rozmiaru i silnika.",
+        description="Generator insertow - wybor rozmiaru i silnika.",
     )
     parser.add_argument(
         "-size",
@@ -93,7 +88,7 @@ def main() -> None:
         print("WARNING: Obie flagi (-total-rows i -size) podane. Usunę -size i użyję -total-rows")
         args.size = None
 
-    print("=== Generator insertow (szkielet) ===")
+    print("=== Generator insertow ===")
 
     if args.total_rows is not None:
         print("\nWybrane parametry:")
@@ -131,7 +126,7 @@ def main() -> None:
     output_path.write_text(generated_content, encoding="utf-8")
     print(f"- Plik wynikowy: {output_path}")
 
-    print("\nSzkielet generatora zostal uruchomiony poprawnie.")
+    print("\nGenerator zostal uruchomiony poprawnie.")
 
 
 if __name__ == "__main__":
