@@ -1,8 +1,10 @@
 FROM maven:3-amazoncorretto-21 AS build
 WORKDIR /app
-COPY bench/ /app
 # cache dependencies
-RUN --mount=type=cache,target=/root/.m2 mvn clean package -DskipTests
+COPY bench/pom.xml /app/pom.xml
+RUN mvn dependency:go-offline -B
+COPY bench/src /app/src
+RUN mvn clean package -DskipTests
 
 FROM maven:3-amazoncorretto-21 AS runner
 WORKDIR /app
