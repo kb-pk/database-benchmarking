@@ -6,7 +6,7 @@ import org.springframework.data.cassandra.core.mapping.Table;
 import java.sql.Time;
 import java.util.UUID;
 
-@Table("bookshop")
+@Table("bookshops")
 public class BookShop {
     @PrimaryKey
     private UUID id;
