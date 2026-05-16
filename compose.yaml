@@ -84,7 +84,7 @@ services:
       CASSANDRA_USER: "notimportant"
       CASSANDRA_PASSWORD: "notimportant"
     volumes:
-      - "./schema/widecolumn:/schema"
+      - "./schema/widecolumn:/schema:ro"
     networks:
       - cassandra
     depends_on:
