@@ -1,7 +1,7 @@
-CREATE KEYSPACE IF NOT EXISTS bench_bookshop
+CREATE KEYSPACE IF NOT EXISTS bench
     WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
 
-USE bench_bookshop;
+USE bench;
 
 CREATE TABLE bookshops (
     shop_id uuid PRIMARY KEY,
