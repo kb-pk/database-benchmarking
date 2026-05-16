@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class SQLBookShopService implements BookShopService {
+public class SQLBookShopService implements BookShopService<Long> {
     private final BookRepository bookRepository;
 
     public SQLBookShopService(BookRepository bookRepository) {

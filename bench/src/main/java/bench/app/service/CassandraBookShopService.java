@@ -5,9 +5,10 @@ import bench.app.repository.cassandra.BookShopRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
-public class CassandraBookShopService implements BookShopService {
+public class CassandraBookShopService implements BookShopService<UUID> {
     private final BookShopRepository bookShopRepository;
 
     public CassandraBookShopService(BookShopRepository bookShopRepository) {
@@ -15,7 +16,7 @@ public class CassandraBookShopService implements BookShopService {
     }
 
     @Override
-    public List<Book> getBooks(Long bookShopId, boolean onlyAvailable) {
+    public List<Book> getBooks(UUID bookShopId, boolean onlyAvailable) {
         throw new UnsupportedOperationException();
     }
 }

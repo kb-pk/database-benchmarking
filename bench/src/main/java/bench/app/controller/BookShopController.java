@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 public class BookShopController {
@@ -26,7 +27,7 @@ public class BookShopController {
     }
 
     @GetMapping("/nosql/bookshop/{bookShopId}/books")
-    public List<Book> getAllBooksNoSQL(@PathVariable Long bookShopId, @RequestParam boolean onlyAvailable) {
+    public List<Book> getAllBooksNoSQL(@PathVariable UUID bookShopId, @RequestParam boolean onlyAvailable) {
         return this.cassandraBookShopService.getBooks(bookShopId, onlyAvailable);
     }
 }
