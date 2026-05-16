@@ -70,6 +70,29 @@ services:
     #networks:
      # - scylla
 
+  backend:
+    build:
+      context: .
+      dockerfile: "bench.Dockerfile"
+      target: runner
+    container_name: "backend"
+    ports:
+      - "8080:8080"
+    networks:
+      - mssql
+      - postgres
+      - cassandra
+      - scylla
+      - external
+    depends_on:
+#      mssql:
+#        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      cassandra-init:
+        condition: service_completed_successfully
+#      scylla:
+#        condition: service_healthy
 
 networks:
   mssql:
@@ -77,10 +100,12 @@ networks:
     internal: true
   postgres:
     name: postgres
-#    internal: true
+    internal: true
   cassandra:
     name: cassandra
     internal: true
   scylla:
     name: scylla
     internal: true
+  external:
+    name: external
