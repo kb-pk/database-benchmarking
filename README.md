@@ -3,7 +3,8 @@ Link do UML: https://lucid.app/lucidchart/87988d5e-6ca7-449b-be75-491117a453e3/e
 ## Uruchamianie
 `docker compose up --build -d`
 
-Wymagany Docker Engine ze wsparciem dla BuildKit. Pierwsze uruchomienie będzie nieco wolniejsze (zapełnienie lokalnego repozytorium Maven).
+Wymagany procesor ze wsparciem dla SSE4.2 (flaga `sse4_2`) oraz PCLMUL (flaga `pclmulqdq`). 
+Pierwsze uruchomienie będzie nieco wolniejsze (zapełnienie lokalnego repozytorium Maven).
 
 ## Generowanie danych
 
