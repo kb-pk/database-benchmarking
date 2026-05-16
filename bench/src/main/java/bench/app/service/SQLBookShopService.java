@@ -1,17 +1,17 @@
 package bench.app.service;
 
 import bench.app.model.common.Book;
-import bench.app.repository.sql.BookRepository;
+import bench.app.repository.sql.postgres.PostgresBookShopRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
 public class SQLBookShopService implements BookShopService<Long> {
-    private final BookRepository bookRepository;
+    private final PostgresBookShopRepository bookShopRepository;
 
-    public SQLBookShopService(BookRepository bookRepository) {
-        this.bookRepository = bookRepository;
+    public SQLBookShopService(PostgresBookShopRepository bookShopRepository) {
+        this.bookShopRepository = bookShopRepository;
     }
 
     @Override

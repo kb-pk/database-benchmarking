@@ -16,3 +16,17 @@ spring:
     keyspace-name: "bench"
     local-datacenter: "datacenter1"
     schema-action: none
+
+app:
+  datasource:
+    mssql:
+      url: jdbc:sqlserver://mssql:1433;databaseName=bench;encrypt=false
+      username: sa
+      password: "@testtest123A"
+      driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+
+    scylla:
+      contact-points: scylla:9042
+      keyspace-name: "bench"
+      local-datacenter: "datacenter1"
+      schema-action: none
