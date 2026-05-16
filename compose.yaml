@@ -29,12 +29,39 @@ services:
     networks:
       - postgres
 
-#  cassandra:
-#    image: cassandra:5.0.6
-#    restart: unless-stopped
-#    container_name: "cassandra"
-#    networks:
-#      - cassandra
+  cassandra:
+    image: cassandra:5.0.6
+    restart: unless-stopped
+    container_name: "cassandra"
+    environment:
+      CASSANDRA_USER: "${CASSANDRA_USER:?}"
+      CASSANDRA_PASSWORD: "${CASSANDRA_PWD:?}"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u ${CASSANDRA_USER} -p ${CASSANDRA_PWD}"]
+      interval: 15s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+      start_interval: 60s
+    networks:
+      - cassandra
+
+  # cassandra doesnt have entrypoint scripts by default
+  cassandra-init:
+    image: cassandra:5.0.6
+    restart: no
+    container_name: "cassandra-init"
+    command: cqlsh cassandra -f /schema/create_schema.cql
+    environment:
+      CASSANDRA_USER: "notimportant"
+      CASSANDRA_PASSWORD: "notimportant"
+    volumes:
+      - "./schema/widecolumn:/schema"
+    networks:
+      - cassandra
+    depends_on:
+      cassandra:
+        condition: service_healthy
 
 #  scylla:
  #   image: scylladb/scylla:2025.3
