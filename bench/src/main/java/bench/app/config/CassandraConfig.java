@@ -15,7 +15,7 @@ import java.net.InetSocketAddress;
 @Configuration
 @EnableCassandraRepositories(
         cassandraTemplateRef = "cassandraTemplate",
-        basePackages = "com.myapp.repository.cassandra"
+        basePackages = "bench.app.repository.cql.cassandra"
 )
 public class CassandraConfig {
 
