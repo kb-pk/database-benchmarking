@@ -7,7 +7,7 @@ Wymagany procesor ze wsparciem dla SSE4.2 (flaga `sse4_2`) oraz PCLMUL (flaga `p
 Pierwsze uruchomienie będzie nieco wolniejsze (zapełnienie lokalnego repozytorium Maven).
 
 ## Development
-Komenda z uruchamiania. W przypadku chęci rebuildu backendu (przy już uruchomionych bazach danych) tak, aby zaoszczędzić czas - `docker compose up --build -d backend`
+Komenda z uruchamiania. W przypadku chęci rebuildu backendu (przy już uruchomionych bazach danych) tak, aby zaoszczędzić czas - `docker compose up --build -d backend --no-deps`
 
 ## Generowanie danych
 
