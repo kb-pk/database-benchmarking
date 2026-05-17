@@ -1,33 +1,49 @@
 package bench.app.controller;
 
-import bench.app.model.common.Book;
-import bench.app.service.CassandraBookShopService;
-import bench.app.service.SQLBookShopService;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import bench.app.model.common.BookShop;
+import bench.app.service.cql.CassandraBookShopService;
+import bench.app.service.cql.ScyllaBookShopService;
+import bench.app.service.sql.MssqlBookShopService;
+import bench.app.service.sql.PostgresBookShopService;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID;
 
 @RestController
+@RequestMapping("/bookshop")
 public class BookShopController {
-    private final SQLBookShopService sqlBookShopService;
-    private final CassandraBookShopService cassandraBookShopService;
+    private final PostgresBookShopService postgresService;
+    private final MssqlBookShopService mssqlService;
+    private final CassandraBookShopService cassandraService;
+    private final ScyllaBookShopService scyllaService;
 
-    // Spring will automatically inject the services through this constructor
-    public BookShopController(SQLBookShopService sqlBookShopService, CassandraBookShopService cassandraBookShopService) {
-        this.sqlBookShopService = sqlBookShopService;
-        this.cassandraBookShopService = cassandraBookShopService;
-    }
-    @GetMapping("/sql//bookshop/{bookShopId}/books")
-    public List<Book> getAllBooksSQL(@PathVariable Long bookShopId, @RequestParam boolean onlyAvailable) {
-        return this.sqlBookShopService.getBooks(bookShopId, onlyAvailable);
+    public BookShopController(
+            PostgresBookShopService postgresService,
+            MssqlBookShopService mssqlService,
+            CassandraBookShopService cassandraService,
+            ScyllaBookShopService scyllaService) {
+        this.postgresService = postgresService;
+        this.mssqlService = mssqlService;
+        this.cassandraService = cassandraService;
+        this.scyllaService = scyllaService;
     }
 
-    @GetMapping("/nosql/bookshop/{bookShopId}/books")
-    public List<Book> getAllBooksNoSQL(@PathVariable UUID bookShopId, @RequestParam boolean onlyAvailable) {
-        return this.cassandraBookShopService.getBooks(bookShopId, onlyAvailable);
+    @GetMapping("/bookshop")
+    public List<BookShop> getBookShops(@RequestParam String db) {
+        switch (db) {
+            case "POSTGRESQL" -> {
+                return this.postgresService.getBookShops();
+            }
+            case "MSSQL" -> {
+                return this.mssqlService.getBookShops();
+            }
+            case "CASSANDRA" -> {
+                return this.cassandraService.getBookShops();
+            }
+            case "SCYLLA" -> {
+                return this.scyllaService.getBookShops();
+            }
+            default -> throw new IllegalArgumentException("Unknown database: " + db);
+        }
     }
 }
