@@ -30,20 +30,12 @@ public class BookShopController {
 
     @GetMapping
     public List<BookShop> getBookShops(@RequestParam String db) {
-        switch (db) {
-            case "POSTGRESQL" -> {
-                return this.postgresService.getBookShops();
-            }
-            case "MSSQL" -> {
-                return this.mssqlService.getBookShops();
-            }
-            case "CASSANDRA" -> {
-                return this.cassandraService.getBookShops();
-            }
-            case "SCYLLA" -> {
-                return this.scyllaService.getBookShops();
-            }
+        return switch (db) {
+            case "POSTGRESQL" -> this.postgresService.getBookShops();
+            case "MSSQL" -> this.mssqlService.getBookShops();
+            case "CASSANDRA" -> this.cassandraService.getBookShops();
+            case "SCYLLA" -> this.scyllaService.getBookShops();
             default -> throw new IllegalArgumentException("Unknown database: " + db);
-        }
+        };
     }
 }
