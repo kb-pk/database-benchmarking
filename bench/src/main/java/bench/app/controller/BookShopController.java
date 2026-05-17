@@ -1,8 +1,8 @@
 package bench.app.controller;
 
 import bench.app.model.common.BookShop;
-import bench.app.service.cql.CassandraBookShopService;
-import bench.app.service.cql.ScyllaBookShopService;
+import bench.app.service.cql.cassandra.CassandraBookShopService;
+import bench.app.service.cql.scylla.ScyllaBookShopService;
 import bench.app.service.sql.MssqlBookShopService;
 import bench.app.service.sql.PostgresBookShopService;
 import org.springframework.web.bind.annotation.*;

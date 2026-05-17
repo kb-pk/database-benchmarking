@@ -1,13 +1,18 @@
 package bench.app.model.common;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
 import java.util.List;
 
-public record BookShop(
-    Employee manager,
-    OpeningHours openingHours,
-    List<Book> bookOfferings,
+@Data
+@AllArgsConstructor
+public class BookShop {
+    private Employee manager;
+    private final OpeningHours openingHours;
+    private final List<Book> bookOfferings;
 
-    String shopName,
-    String address,
-    String email
-) {}
+    private final String shopName;
+    private final String address;
+    private final String email;
+}
