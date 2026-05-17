@@ -28,7 +28,7 @@ public class BookShopController {
         this.scyllaService = scyllaService;
     }
 
-    @GetMapping("/bookshop")
+    @GetMapping
     public List<BookShop> getBookShops(@RequestParam String db) {
         switch (db) {
             case "POSTGRESQL" -> {
