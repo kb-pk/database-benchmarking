@@ -2,11 +2,14 @@ spring:
   application:
     name: bench
   datasource:
-    url: jdbc:postgresql://postgres:5432/bench
+    url: jdbc:postgresql://postgres:5432/bench?currentSchema=bench
     username: postgres
     password: "@testtest123A"
     driver-class-name: org.postgresql.Driver
   jpa:
+    properties:
+      hibernate:
+        default_schema: bench
     hibernate:
       ddl-auto: update #validate
     show-sql: false

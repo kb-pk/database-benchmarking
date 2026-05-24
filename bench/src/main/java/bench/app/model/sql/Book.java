@@ -6,27 +6,42 @@ import jakarta.persistence.*;
 import java.util.Date;
 
 @Entity
+@Table(name = "book")
 public class Book implements ConvertibleTo<bench.app.model.common.Book> {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
-    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "bookshopid")
     private BookShop bookShop;
 
     private String author;
     private String title;
     private String publisher;
+    @Column(name = "publishdate")
     private Date publishDate;
     private int pages;
+    @Column(name = "isinreadingroom")
     private boolean isInReadingRoom;
 
     @Override
     public bench.app.model.common.Book convertToModel() {
         return new bench.app.model.common.Book(
-                bookShop.convertToModel(),
+                bookShop == null ? null : bookShop.toShallowModel(),
                 author, title,
                 publisher, publishDate,
                 pages, isInReadingRoom);
+    }
+
+    bench.app.model.common.Book toShallowModel() {
+        return new bench.app.model.common.Book(
+                bookShop == null ? null : bookShop.toShallowModel(),
+                author,
+                title,
+                publisher,
+                publishDate,
+                pages,
+                isInReadingRoom
+        );
     }
 }

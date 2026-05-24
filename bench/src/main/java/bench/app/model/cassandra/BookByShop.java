@@ -6,7 +6,7 @@ import org.springframework.data.cassandra.core.mapping.Column;
 import org.springframework.data.cassandra.core.mapping.PrimaryKeyColumn;
 import org.springframework.data.cassandra.core.mapping.Table;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -24,7 +24,7 @@ public class BookByShop {
     private String title;
     private String publisher;
     @Column("publish_date")
-    private Date publishDate;
+    private LocalDate publishDate;
     private int pages;
     @Column("is_in_reading_room")
     private boolean isInReadingRoom;

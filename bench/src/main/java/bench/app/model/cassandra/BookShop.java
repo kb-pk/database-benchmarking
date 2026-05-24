@@ -12,6 +12,7 @@ import java.util.UUID;
 @Table("bookshops")
 public class BookShop {
     @PrimaryKey
+    @Column("shop_id")
     private UUID id;
 
     @Column("manager_id")

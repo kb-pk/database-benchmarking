@@ -144,7 +144,7 @@ CREATE TABLE bench.ActivationStatus (
 );
 
 ALTER TABLE bench.BookShopOpeningHours
-    ADD CONSTRAINT bookshopopeninghours_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id) DEFERRABLE INITIALLY DEFERRED;
+    ADD CONSTRAINT bookshopopeninghours_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id);
 
 ALTER TABLE bench.Book
     ADD CONSTRAINT book_fk1 FOREIGN KEY (bookShopId) REFERENCES bench.BookShop(id);
@@ -152,7 +152,7 @@ ALTER TABLE bench.Book
 ALTER TABLE bench.BookShop
     ADD CONSTRAINT bookshop_fk1 FOREIGN KEY (managerId) REFERENCES bench.Employee(id);
 ALTER TABLE bench.BookShop
-    ADD CONSTRAINT bookshop_fk2 FOREIGN KEY (openingHoursId) REFERENCES bench.BookShopOpeningHours(id) DEFERRABLE INITIALLY DEFERRED;
+    ADD CONSTRAINT bookshop_fk2 FOREIGN KEY (openingHoursId) REFERENCES bench.BookShopOpeningHours(id);
 
 ALTER TABLE bench.BookShopOffering
     ADD CONSTRAINT bookshopoffering_fk1 FOREIGN KEY (bookId) REFERENCES bench.Book(id);

@@ -5,6 +5,7 @@ import bench.app.model.common.BookShop;
 import bench.app.repository.sql.postgres.PostgresBookShopRepository;
 import bench.app.service.BookShopService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -19,5 +20,11 @@ public class PostgresBookShopService extends SQLBookShopService<PostgresBookShop
     @Override
     public PostgresBookShopRepository getRepository() {
         return this.bookShopRepository;
+    }
+
+    @Override
+    @Transactional(transactionManager = "postgresTransactionManager", readOnly = true)
+    public List<BookShop> getBookShops() {
+        return super.getBookShops();
     }
 }

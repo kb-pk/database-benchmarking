@@ -5,6 +5,7 @@ import bench.app.model.common.Employee;
 import bench.app.model.common.LazilyInstantiated;
 import bench.app.repository.cql.EmployeesByShopRepository;
 
+import java.sql.Date;
 import java.util.UUID;
 
 public abstract class CQLDeferredEmployeeService<
@@ -13,7 +14,7 @@ public abstract class CQLDeferredEmployeeService<
     protected abstract EmployeesByShopRepo getEmployeeByShopRepo();
 
     protected LazilyInstantiated<Employee, bench.app.model.common.BookShop> getDeferredEmployee(UUID id) {
-        EmployeeByShop e = this.getEmployeeByShopRepo().findById(id)
+        EmployeeByShop e = this.getEmployeeByShopRepo().findByEmployeeId(id)
                 .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
 
         return bs -> new Employee(
@@ -22,8 +23,8 @@ public abstract class CQLDeferredEmployeeService<
                 e.getSurname(),
                 e.getPhoneNumber(),
                 e.getEmail(),
-                e.getBirthDate(),
-                e.getStartedAt(),
+                e.getBirthDate() != null ? Date.valueOf(e.getBirthDate()) : null,
+                e.getStartedAt() != null ? Date.valueOf(e.getStartedAt()) : null,
                 e.getPrimaryBusinessRole()
         );
     }

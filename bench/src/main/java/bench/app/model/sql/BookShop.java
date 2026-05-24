@@ -6,18 +6,21 @@ import jakarta.persistence.*;
 import java.util.List;
 
 @Entity
+@Table(name = "bookshop")
 public class BookShop implements ConvertibleTo<bench.app.model.common.BookShop> {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
-    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "managerid")
     private Employee manager;
-    @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "openinghoursid")
     private OpeningHours openingHours;
-    @OneToMany(fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "bookShop", fetch = FetchType.LAZY)
     private List<Book> bookOfferings;
 
+    @Column(name = "shopname")
     private String shopName;
     private String address;
     private String email;
@@ -25,7 +28,7 @@ public class BookShop implements ConvertibleTo<bench.app.model.common.BookShop> 
     @Override
     public bench.app.model.common.BookShop convertToModel() {
         return new bench.app.model.common.BookShop(
-                manager.convertToModel(),
+            manager == null ? null : manager.toShallowModel(),
                 openingHours.convertToModel(),
                 bookOfferings
                         .stream()
@@ -34,4 +37,15 @@ public class BookShop implements ConvertibleTo<bench.app.model.common.BookShop> 
                 shopName, address, email
         );
     }
+
+        bench.app.model.common.BookShop toShallowModel() {
+        return new bench.app.model.common.BookShop(
+            null,
+            null,
+            List.of(),
+            shopName,
+            address,
+            email
+        );
+        }
 }

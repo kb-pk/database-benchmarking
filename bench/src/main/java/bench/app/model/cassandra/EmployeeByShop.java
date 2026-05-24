@@ -6,7 +6,7 @@ import org.springframework.data.cassandra.core.mapping.Column;
 import org.springframework.data.cassandra.core.mapping.PrimaryKeyColumn;
 import org.springframework.data.cassandra.core.mapping.Table;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -26,9 +26,9 @@ public class EmployeeByShop {
     private String phoneNumber;
     private String email;
     @Column("birth_date")
-    private Date birthDate;
+    private LocalDate birthDate;
     @Column("started_at")
-    private Date startedAt;
+    private LocalDate startedAt;
     @Column("primary_business_role")
     private String primaryBusinessRole;
 }

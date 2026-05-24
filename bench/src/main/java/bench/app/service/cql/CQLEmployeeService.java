@@ -7,6 +7,7 @@ import bench.app.repository.cql.BooksByShopRepository;
 import bench.app.repository.cql.EmployeesByShopRepository;
 import org.springframework.data.cassandra.repository.CassandraRepository;
 
+import java.util.List;
 import java.util.UUID;
 
 public abstract class CQLEmployeeService<
@@ -24,6 +25,14 @@ public abstract class CQLEmployeeService<
                 .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
 
         bench.app.model.common.BookShop shop = this.getBookShopService().getBookShop(e.getPrimaryBookShopId());
-        return this.getBookShopService().getDeferredEmployeeService().getDeferredEmployee(id).instantiateWith(shop);
+        bench.app.model.common.BookShop shallowShop = new bench.app.model.common.BookShop(
+            null,
+            shop.getOpeningHours(),
+            List.of(),
+            shop.getShopName(),
+            shop.getAddress(),
+            shop.getEmail()
+        );
+        return this.getBookShopService().getDeferredEmployeeService().getDeferredEmployee(id).instantiateWith(shallowShop);
     }
 }

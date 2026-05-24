@@ -10,6 +10,7 @@ import bench.app.repository.cql.EmployeesByShopRepository;
 import bench.app.service.BookShopService;
 import org.springframework.data.cassandra.repository.CassandraRepository;
 
+import java.sql.Date;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -44,6 +45,17 @@ public abstract class CQLBookShopService<
         return this.getBookShop(bookShopId).getBookOfferings();
     }
 
+        protected bench.app.model.common.BookShop toShallowBookShopModel(bench.app.model.common.BookShop shop) {
+                return new bench.app.model.common.BookShop(
+                                null,
+                                shop.getOpeningHours(),
+                                List.of(),
+                                shop.getShopName(),
+                                shop.getAddress(),
+                                shop.getEmail()
+                );
+        }
+
     private bench.app.model.common.BookShop toBookShopModel(BookShop shop) {
         List<bench.app.model.common.Book> bookOfferings = new ArrayList<>();
         bench.app.model.common.BookShop s = new bench.app.model.common.BookShop(
@@ -56,18 +68,27 @@ public abstract class CQLBookShopService<
                 bookOfferings,
                 shop.getShopName(), shop.getAddress(), shop.getEmail()
         );
+        bench.app.model.common.BookShop shallowBookShop = this.toShallowBookShopModel(s);
 
         // lazily instantiate shop for manager
-        Employee manager = this.getDeferredEmployeeService().getDeferredEmployee(shop.getManagerId())
-                .instantiateWith(s);
-        s.setManager(manager);
+        if (shop.getManagerId() != null) {
+            try {
+                Employee manager = this.getDeferredEmployeeService().getDeferredEmployee(shop.getManagerId())
+                        .instantiateWith(shallowBookShop);
+                s.setManager(manager);
+            } catch (IllegalArgumentException ignored) {
+                s.setManager(null);
+            }
+        }
 
         // fill in books
         List<BookByShop> booksByShops = this.getBooksByShopRepo().findByShopId(shop.getId());
         bookOfferings.addAll(booksByShops.stream()
                 .map(x -> new Book(
-                        s,
-                        x.getAuthor(), x.getTitle(), x.getPublisher(), x.getPublishDate(), x.getPages(), x.isInReadingRoom())
+                        shallowBookShop,
+                        x.getAuthor(), x.getTitle(), x.getPublisher(),
+                        x.getPublishDate() != null ? Date.valueOf(x.getPublishDate()) : null,
+                        x.getPages(), x.isInReadingRoom())
                 ).toList()
         );
 

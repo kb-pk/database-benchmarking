@@ -369,13 +369,12 @@ def generate_employee_inserts(row_count: int) -> list[str]:
         birth_date = f"{1975 + (row_id % 20):04d}-{((row_id % 12) + 1):02d}-{((row_id % 28) + 1):02d}"
         started_at = f"{2015 + (row_id % 9):04d}-{((row_id % 12) + 1):02d}-01"
         primary_role = roles[(row_id - 1) % len(roles)]
-        salary = 5200 + row_id * 450
         lines.append(
             "INSERT INTO bench.Employee "
-            "(id, name, surname, phoneNumber, email, birthDate, startedAt, primaryBookShopId, primaryBusinessRole, salary) "
+            "(id, name, surname, phoneNumber, email, birthDate, startedAt, primaryBookShopId, primaryBusinessRole) "
             f"VALUES ({row_id}, '{_sql_quote(name)}', '{_sql_quote(surname)}', "
             f"'{_sql_quote(phone_number)}', '{_sql_quote(email)}', '{birth_date}', '{started_at}', "
-            f"NULL, '{_sql_quote(primary_role)}', {salary});"
+            f"NULL, '{_sql_quote(primary_role)}');"
         )
     return lines
 

@@ -25,7 +25,7 @@ services:
     command: >
       /opt/mssql-tools18/bin/sqlcmd -S mssql -C -U sa -P ${MSSQL_SA_PWD} -Q 'CREATE DATABASE bench' && \
       /opt/mssql-tools18/bin/sqlcmd -S mssql -d bench -C -U sa -P ${MSSQL_SA_PWD} -i /schema/create_schema.sql && \
-      /opt/mssql-tools-18/bin/sqlcmd -S mssql -d bench -C -U sa -P ${MSSQL_SA_PWD} -i /schema/create_schema_structure.sql"
+      /opt/mssql-tools18/bin/sqlcmd -S mssql -d bench -C -U sa -P ${MSSQL_SA_PWD} -i /schema/create_schema_structure.sql
     environment:
       ACCEPT_EULA: "y"
       MSSQL_PID: "EnterpriseDeveloper"
