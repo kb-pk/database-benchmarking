@@ -21,6 +21,8 @@ spring:
     schema-action: none
 
 app:
+  benchmark:
+    output-dir: output_data
   datasource:
     mssql:
       url: jdbc:sqlserver://mssql:1433;databaseName=bench;encrypt=false
