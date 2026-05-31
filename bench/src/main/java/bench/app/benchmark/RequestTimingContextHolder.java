@@ -8,8 +8,15 @@ import java.util.Optional;
 public class RequestTimingContextHolder {
     private static final ThreadLocal<RequestTimingContext> CONTEXT = new ThreadLocal<>();
 
-    public void start(String requestId, String httpMethod, String path, String dbEngine) {
-        CONTEXT.set(new RequestTimingContext(requestId, httpMethod, path, dbEngine));
+    public void start(
+            String requestId,
+            String httpMethod,
+            String path,
+            String operationLabel,
+            Integer iteration,
+            String dbEngine
+    ) {
+        CONTEXT.set(new RequestTimingContext(requestId, httpMethod, path, operationLabel, iteration, dbEngine));
     }
 
     public Optional<RequestTimingContext> getCurrent() {

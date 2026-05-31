@@ -1,6 +1,7 @@
 package bench.app.service.sql;
 
 import bench.app.model.common.BookShop;
+import bench.app.model.common.Book;
 import bench.app.repository.sql.mssql.MssqlBookShopRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,5 +25,11 @@ public class MssqlBookShopService extends SQLBookShopService<MssqlBookShopReposi
     @Transactional(transactionManager = "mssqlTransactionManager", readOnly = true)
     public List<BookShop> getBookShops() {
         return super.getBookShops();
+    }
+
+    @Override
+    @Transactional(transactionManager = "mssqlTransactionManager", readOnly = true)
+    public List<Book> getBooks(Long bookShopId, boolean onlyAvailable) {
+        return super.getBooks(bookShopId, onlyAvailable);
     }
 }

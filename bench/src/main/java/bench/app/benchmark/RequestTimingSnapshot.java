@@ -8,6 +8,8 @@ public record RequestTimingSnapshot(
         String requestId,
         String httpMethod,
         String path,
+        String operationLabel,
+        Integer iteration,
         String dbEngine,
         int httpStatus,
         double totalElapsedMillis,

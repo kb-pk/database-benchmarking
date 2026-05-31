@@ -20,6 +20,18 @@ public abstract class SQLBookShopService<Repo extends JpaRepository<bench.app.mo
 
     @Override
     public List<Book> getBooks(Long bookShopId, boolean onlyAvailable) {
-        throw new UnsupportedOperationException();
+        List<Book> books = this.getRepository()
+                .findById(Math.toIntExact(bookShopId))
+                .orElseThrow(() -> new IllegalArgumentException("Bookshop not found"))
+                .convertToModel()
+                .getBookOfferings();
+
+        if (!onlyAvailable) {
+            return books;
+        }
+
+        return books.stream()
+                .filter(book -> !book.isInReadingRoom())
+                .toList();
     }
 }

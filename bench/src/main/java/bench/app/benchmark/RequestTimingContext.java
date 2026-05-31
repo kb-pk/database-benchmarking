@@ -9,15 +9,26 @@ public final class RequestTimingContext {
     private final String requestId;
     private final String httpMethod;
     private final String path;
+    private final String operationLabel;
+    private final Integer iteration;
     private final String dbEngine;
     private final long requestStartNanos;
     private final List<CrudOperationTiming> operations = new ArrayList<>();
 
-    public RequestTimingContext(String requestId, String httpMethod, String path, String dbEngine) {
+    public RequestTimingContext(
+            String requestId,
+            String httpMethod,
+            String path,
+            String operationLabel,
+            Integer iteration,
+            String dbEngine
+    ) {
         this.timestamp = Instant.now();
         this.requestId = requestId;
         this.httpMethod = httpMethod;
         this.path = path;
+        this.operationLabel = operationLabel;
+        this.iteration = iteration;
         this.dbEngine = dbEngine;
         this.requestStartNanos = System.nanoTime();
     }
@@ -34,6 +45,8 @@ public final class RequestTimingContext {
                 this.requestId,
                 this.httpMethod,
                 this.path,
+                this.operationLabel,
+                this.iteration,
                 this.dbEngine,
                 status,
                 elapsedMillis,

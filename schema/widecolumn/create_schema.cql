@@ -3,7 +3,7 @@ CREATE KEYSPACE IF NOT EXISTS bench
 
 USE bench;
 
-CREATE TABLE bookshops (
+CREATE TABLE IF NOT EXISTS bookshops (
     shop_id uuid PRIMARY KEY,
     shop_name text,
     address text,
@@ -25,7 +25,7 @@ CREATE TABLE bookshops (
     closes_at_sunday time
 );
 
-CREATE TABLE books_by_shop (
+CREATE TABLE IF NOT EXISTS books_by_shop (
     shop_id uuid,
     book_id uuid,
     author text,
@@ -37,7 +37,7 @@ CREATE TABLE books_by_shop (
     PRIMARY KEY ((shop_id), book_id)
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user_id uuid PRIMARY KEY,
     name text,
     surname text,
@@ -50,14 +50,14 @@ CREATE TABLE users (
     permissions set<text>
 );
 
-CREATE TABLE user_credentials_by_login (
+CREATE TABLE IF NOT EXISTS user_credentials_by_login (
     login text PRIMARY KEY,
     user_id uuid,
     password_hash text,
     status text
 );
 
-CREATE TABLE employees_by_shop (
+CREATE TABLE IF NOT EXISTS employees_by_shop (
     primary_book_shop_id uuid,
     employee_id uuid,
     name text,
@@ -70,7 +70,7 @@ CREATE TABLE employees_by_shop (
     PRIMARY KEY ((primary_book_shop_id), employee_id)
 );
 
-CREATE TABLE rentals_by_user (
+CREATE TABLE IF NOT EXISTS rentals_by_user (
      user_id uuid,
      start_date date,
      rental_id uuid,
@@ -84,7 +84,7 @@ CREATE TABLE rentals_by_user (
      PRIMARY KEY ((user_id), start_date, rental_id)
 ) WITH CLUSTERING ORDER BY (start_date DESC);
 
-CREATE TABLE rentals_by_shop (
+CREATE TABLE IF NOT EXISTS rentals_by_shop (
     shop_id uuid,
     start_date date,
     rental_id uuid,
@@ -97,7 +97,7 @@ CREATE TABLE rentals_by_shop (
     PRIMARY KEY ((shop_id), start_date, rental_id)
 ) WITH CLUSTERING ORDER BY (start_date DESC);
 
-CREATE TABLE reservations_by_user (
+CREATE TABLE IF NOT EXISTS reservations_by_user (
     user_id uuid,
     when_reserved date,
     reservation_id uuid,

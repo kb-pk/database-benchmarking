@@ -5,15 +5,17 @@ import jakarta.persistence.*;
 
 @Entity
 // conflicts with user
-@Table(name = "users")
+@Table(name = "bookshopuser")
 public class User implements ConvertibleTo<bench.app.model.common.User> {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
     @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JoinColumn(name = "mainbookshopid")
     private BookShop mainBookShop;
     @ManyToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JoinColumn(name = "isactiveid")
     private UserActivationStatus activationStatus;
 
     private String name;

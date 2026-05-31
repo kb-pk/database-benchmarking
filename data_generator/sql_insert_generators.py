@@ -1,3 +1,7 @@
+
+from __future__ import annotations
+# Generator insertów do tabeli BookRental
+import random
 """Generatory plikow SQL z insertami.
 
 Ten modul na tym etapie generuje:
@@ -6,8 +10,6 @@ Ten modul na tym etapie generuje:
 
 Wymaganie: PostgreSQL i MSSQL dostaja identyczna tresc SQL.
 """
-
-from __future__ import annotations
 
 
 RELATIONAL_TABLES = (
@@ -54,12 +56,28 @@ TABLE_ROW_COUNTS = {
     "UserAccount": DEFAULT_ROW_COUNT,
     "Employee": len(BOOK_SHOPS),
     "BookShop": len(BOOK_SHOPS),
-    "Book": DEFAULT_ROW_COUNT,
-    "BookShopOffering": 1000,
+    "Book": 5000,
+    "BookShopOffering": 2500,
     "BookReservation": 250,
     "BookRental": 350,
     "BookShopOpeningHours": len(BOOK_SHOPS),
 }
+
+
+def _pick_user_id_with_activity_skew(
+    row_id: int,
+    user_count: int,
+    *,
+    activity_ratio: float = 0.2,
+    step: int = 7,
+) -> int:
+    """Zwraca user_id z lekkim skosem aktywności.
+
+    Założenie: tylko część użytkowników jest bardzo aktywna,
+    więc pojawiają się wielokrotne rezerwacje/wypożyczenia dla tych samych osób.
+    """
+    active_user_count = max(1, min(user_count, int(user_count * activity_ratio)))
+    return ((row_id * step - 1) % active_user_count) + 1
 
 
 def _sql_quote(value: str) -> str:
@@ -116,8 +134,8 @@ def calculate_table_row_counts(total_rows: int, min_users: int = 20, max_users: 
     user_account_count = book_shop_user_count  # 1:1 zależność
     
     # Dla ksiazek: Book + BookShopOffering + BookReservation + BookRental
-    # Podziel: 30% ksiazek, 70% wypozyczen/rezerwacji
-    book_count = (book_data_rows * 30) // 100
+    # Zwiększ udział książek do 60% book_data_rows, reszta na powiązania
+    book_count = (book_data_rows * 60) // 100
     book_shop_offering_count = book_count  # 1:1 lub wiecej
     # Reszta na rezerwacje i wypozyczenia
     remaining_book_data = book_data_rows - book_count - book_shop_offering_count
@@ -238,7 +256,8 @@ def generate_book_rental_method_inserts(row_count: int) -> list[str]:
 def generate_book_shop_user_inserts(row_count: int) -> list[str]:
     """Generuje inserty dla bench.BookShopUser.
 
-    Szkielet: mainBookShopId ustawiamy na NULL, aby nie wymagac jeszcze danych BookShop.
+    mainBookShopId ustawiamy tymczasowo na NULL, a powiazanie dopinamy
+    po wygenerowaniu bench.BookShop.
     """
     first_names = [
         "Piotr", "Anna", "Krzysztof", "Maria", "Andrzej",
@@ -263,7 +282,7 @@ def generate_book_shop_user_inserts(row_count: int) -> list[str]:
         surname = surnames[(row_id * 7 - 1) % len(surnames)]
         phone_number = f"+48{row_id % 1_000_000_000:09d}"
         email = f"{name.lower()}.{surname.lower()}{row_id}@poczta.pl"
-        is_active_id = ((row_id - 1) % 5) + 1
+        is_active_id = (((row_id - 1) // len(BOOK_SHOPS)) % 5) + 1
         lines.append(
             "INSERT INTO bench.BookShopUser "
             "(id, name, surname, phoneNumber, email, mainBookShopId, isActiveId) "
@@ -361,6 +380,7 @@ def generate_employee_inserts(row_count: int) -> list[str]:
     ]
 
     lines: list[str] = []
+    book_shop_count = len(BOOK_SHOPS)
     for row_id in range(1, row_count + 1):
         name = first_names[(row_id - 1) % len(first_names)]
         surname = surnames[(row_id * 3 - 1) % len(surnames)]
@@ -475,9 +495,12 @@ def generate_book_shop_offering_inserts(
         book_shop_id = ((row_id * 7 - 1) % book_shop_count) + 1
 
         lines.append(
-            "INSERT INTO bench.BookShopOffering "
-            "(id, bookId, bookShopId) "
-            f"VALUES ({row_id}, {book_id}, {book_shop_id});"
+            "INSERT INTO bench.BookShopOffering (id, bookId, bookShopId) "
+            f"SELECT {row_id}, {book_id}, {book_shop_id} "
+            "WHERE NOT EXISTS ("
+            "SELECT 1 FROM bench.BookShopOffering "
+            f"WHERE id = {row_id} OR (bookId = {book_id} AND bookShopId = {book_shop_id})"
+            ");"
         )
     return lines
 
@@ -493,8 +516,13 @@ def generate_book_reservation_inserts(
     """
     lines: list[str] = []
     for row_id in range(1, row_count + 1):
-        # Losuj uzytkownika i ksiazke z zakresu wygenerowanych rekordow.
-        user_id = ((row_id * 7 - 1) % user_count) + 1
+        # Rozklad celowo nierowny: aktywni czytelnicy dostaja wiecej rezerwacji.
+        user_id = _pick_user_id_with_activity_skew(
+            row_id,
+            user_count,
+            activity_ratio=0.2,
+            step=7,
+        )
         book_id = ((row_id * 11 - 1) % book_count) + 1
         # Data rezerwacji: rozrzucone miedzy ostatnie 180 dni
         days_ago = (row_id % 180)
@@ -508,6 +536,7 @@ def generate_book_reservation_inserts(
     return lines
 
 
+# Generator insertów do tabeli BookRental
 def generate_book_rental_inserts(
     row_count: int,
     user_count: int,
@@ -516,24 +545,29 @@ def generate_book_rental_inserts(
     book_shop_count: int,
 ) -> list[str]:
     """Generuje inserty dla bench.BookRental.
-
-    Wypozyczenia ksiazek od uzytkownikow.
+    Każda książka może być wypożyczona przez różnych użytkowników, obsługiwana przez różnych pracowników, w różnych sklepach, różnymi metodami.
+    70% wypożyczeń jest już zakończonych (ma endDate), reszta aktywna.
+    Komentarze po polsku zgodnie z preferencją użytkownika.
     """
     lines: list[str] = []
     for row_id in range(1, row_count + 1):
-        # Losuj uzytkownika i ksiazke z zakresu wygenerowanych rekordow.
-        user_id = ((row_id * 13 - 1) % user_count) + 1
-        book_id = ((row_id * 17 - 1) % book_count) + 1
-        # Shop wynika bezposrednio z rozkladu ksiazek w generate_book_inserts.
-        book_shop_id = ((book_id - 1) % book_shop_count) + 1
-        # Przypnij wypozyczenie do jednego z istniejacych pracownikow sklepu.
-        employee_id = ((book_shop_id - 1) % employee_count) + 1
-        # Metoda wypozyczenia: rozpedziel miedzy Książkomat (1) i Wypożyczalnię (2)
-        rental_method_id = ((row_id - 1) % 2) + 1
-        # Data wypozyczenia: rozrzucone miedzy ostatnie 90 dni
-        days_ago = (row_id % 90)
+        # Losowanie powiązań
+        user_id = _pick_user_id_with_activity_skew(
+            row_id,
+            user_count,
+            activity_ratio=0.2,
+            step=11,
+        )
+        book_id = ((row_id * 11 - 1) % book_count) + 1
+        employee_id = ((row_id * 5 - 1) % employee_count) + 1
+        book_shop_id = random.randint(1, book_shop_count)
+        rental_method_id = random.randint(1, 2)  # 1 lub 2
+
+        # Daty wypożyczenia (szerszy zakres: 5 lat wstecz)
+        days_ago = (row_id % 1825)  # 5 lat * 365 dni
         start_date = f"2025-{((12 - (days_ago // 30)) % 12) + 1:02d}-{((days_ago % 28) + 1):02d}"
-        # 70% ksiazek jest juz oddanych, reszta pozostaje aktywna bez endDate.
+
+        # 70% wypożyczeń już zakończonych
         is_returned = 1 if ((row_id - 1) % 10) < 7 else 0
         if is_returned:
             rental_duration_days = 7 + (row_id % 21)
@@ -548,6 +582,9 @@ def generate_book_rental_inserts(
             f"VALUES ({row_id}, {book_id}, {user_id}, {employee_id}, {book_shop_id}, {is_returned}, '{start_date}', {end_date_clause}, {rental_method_id});"
         )
     return lines
+
+
+
 
 
 def generate_book_shop_opening_hours_inserts(row_count: int) -> list[str]:
@@ -610,6 +647,18 @@ def generate_employee_updates(row_count: int, book_shop_count: int) -> list[str]
     return lines
 
 
+def generate_book_shop_user_updates(row_count: int, book_shop_count: int) -> list[str]:
+    """Dopina relacje BookShopUser.mainBookShopId do sklepow."""
+    lines: list[str] = []
+    for row_id in range(1, row_count + 1):
+        main_book_shop_id = ((row_id - 1) % book_shop_count) + 1
+        lines.append(
+            "UPDATE bench.BookShopUser "
+            f"SET mainBookShopId = {main_book_shop_id} WHERE id = {row_id};"
+        )
+    return lines
+
+
 def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     """Buduje wspolna tresc SQL dla wszystkich wspieranych silnikow."""
     lines: list[str] = [
@@ -668,13 +717,24 @@ def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     lines.extend(generate_book_shop_inserts(book_shop_count))
     lines.append("")
 
-    # 9) Book
+    # 9) BookShopOpeningHours
+    book_shop_opening_hours_count = table_row_counts["BookShopOpeningHours"]
+    lines.append(f"-- BookShopOpeningHours: {book_shop_opening_hours_count} rows")
+    lines.extend(generate_book_shop_opening_hours_inserts(book_shop_opening_hours_count))
+    lines.append("")
+
+    # 10) Synchronizacja BookShop <-> BookShopOpeningHours
+    lines.append("-- Stage 4: synchronize BookShop and BookShopOpeningHours")
+    lines.extend(generate_book_shop_opening_hours_updates(book_shop_opening_hours_count))
+    lines.append("")
+
+    # 11) Book
     book_count = table_row_counts["Book"]
     lines.append(f"-- Book: {book_count} rows")
     lines.extend(generate_book_inserts(book_count))
     lines.append("")
 
-    # 10) BookShopOffering
+    # 12) BookShopOffering
     book_shop_offering_count = table_row_counts["BookShopOffering"]
     lines.append(f"-- BookShopOffering: {book_shop_offering_count} rows")
     lines.extend(
@@ -686,7 +746,7 @@ def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     )
     lines.append("")
 
-    # 11) BookReservation
+    # 13) BookReservation
     book_reservation_count = table_row_counts["BookReservation"]
     lines.append(f"-- BookReservation: {book_reservation_count} rows")
     lines.extend(
@@ -698,7 +758,7 @@ def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     )
     lines.append("")
 
-    # 12) BookRental
+    # 14) BookRental
     book_rental_count = table_row_counts["BookRental"]
     lines.append(f"-- BookRental: {book_rental_count} rows")
     lines.extend(
@@ -712,20 +772,14 @@ def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
     )
     lines.append("")
 
-    # 13) BookShopOpeningHours
-    book_shop_opening_hours_count = table_row_counts["BookShopOpeningHours"]
-    lines.append(f"-- BookShopOpeningHours: {book_shop_opening_hours_count} rows")
-    lines.extend(generate_book_shop_opening_hours_inserts(book_shop_opening_hours_count))
-    lines.append("")
-
-    # 14) Synchronizacja BookShop <-> BookShopOpeningHours
-    lines.append("-- Stage 4: synchronize BookShop and BookShopOpeningHours")
-    lines.extend(generate_book_shop_opening_hours_updates(book_shop_opening_hours_count))
-    lines.append("")
-
     # 15) Synchronizacja Employee -> BookShop
     lines.append("-- Stage 5: synchronize Employee and BookShop")
     lines.extend(generate_employee_updates(employee_count, book_shop_count))
+    lines.append("")
+
+    # 16) Synchronizacja BookShopUser -> BookShop
+    lines.append("-- Stage 6: synchronize BookShopUser and BookShop")
+    lines.extend(generate_book_shop_user_updates(book_shop_user_count, book_shop_count))
     lines.append("")
 
     return lines

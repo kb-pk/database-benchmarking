@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from datetime import date, timedelta
 from uuid import NAMESPACE_DNS, uuid5
 
@@ -75,6 +76,99 @@ def _resolve_row_counts(dataset_size: int) -> dict[str, int]:
     }
 
 
+def _active_user_pool(users: list[dict[str, str]], activity_ratio: float = 0.2) -> list[dict[str, str]]:
+    """Zwraca aktywna pule użytkowników dla nierównego rozkładu operacji."""
+    active_count = max(1, min(len(users), int(len(users) * activity_ratio)))
+    return users[:active_count]
+
+
+def _build_user_weight_index(users: list[dict[str, str]]) -> tuple[list[int], int]:
+    """Buduje skumulowane wagi, aby zwiększyć różnorodność liczby operacji na użytkownika."""
+    if not users:
+        return [1], 1
+
+    weighted_prefix: list[int] = []
+    total_weight = 0
+    size = len(users)
+
+    for idx, _ in enumerate(users):
+        percentile = (idx + 1) / size
+        if percentile <= 0.05:
+            weight = 20
+        elif percentile <= 0.20:
+            weight = 8
+        elif percentile <= 0.50:
+            weight = 3
+        else:
+            weight = 1
+
+        total_weight += weight
+        weighted_prefix.append(total_weight)
+
+    return weighted_prefix, total_weight
+
+
+def _pick_weighted_user(
+    users: list[dict[str, str]],
+    weighted_prefix: list[int],
+    total_weight: int,
+    sequence: int,
+    salt: int,
+) -> dict[str, str]:
+    """Deterministycznie wybiera użytkownika według rozkładu wag."""
+    if len(users) == 1:
+        return users[0]
+
+    # Deterministyczny "pseudo-random" bez globalnego stanu RNG.
+    mixed = (sequence * 1103515245 + 12345 + salt * 1000003) & 0x7FFFFFFF
+    target = (mixed % total_weight) + 1
+    chosen_idx = bisect_left(weighted_prefix, target)
+    return users[chosen_idx]
+
+
+def _build_book_weight_index(books: list[dict[str, str | int | bool]]) -> tuple[list[int], int]:
+    """Buduje skumulowane wagi popularności książek (część tytułów wypożyczana częściej)."""
+    if not books:
+        return [1], 1
+
+    weighted_prefix: list[int] = []
+    total_weight = 0
+    size = len(books)
+
+    for idx, _ in enumerate(books):
+        percentile = (idx + 1) / size
+        if percentile <= 0.10:
+            weight = 14
+        elif percentile <= 0.35:
+            weight = 5
+        elif percentile <= 0.70:
+            weight = 2
+        else:
+            weight = 1
+
+        total_weight += weight
+        weighted_prefix.append(total_weight)
+
+    return weighted_prefix, total_weight
+
+
+def _pick_weighted_book(
+    books: list[dict[str, str | int | bool]],
+    weighted_prefix: list[int],
+    total_weight: int,
+    sequence: int,
+    salt: int,
+) -> dict[str, str | int | bool]:
+    """Deterministycznie wybiera książkę według rozkładu popularności."""
+    if len(books) == 1:
+        return books[0]
+
+    mixed = (sequence * 214013 + 2531011 + salt * 1000033) & 0x7FFFFFFF
+    target = (mixed % total_weight) + 1
+    chosen_idx = bisect_left(weighted_prefix, target)
+    return books[chosen_idx]
+
+
 def _build_cql(engine_name: str, dataset_size: int) -> str:
     counts = _resolve_row_counts(dataset_size)
     shop_ids = [_stable_uuid("shop", idx + 1) for idx in range(counts["shops"])]
@@ -112,8 +206,11 @@ def _build_cql(engine_name: str, dataset_size: int) -> str:
     for idx in range(counts["users"]):
         row_id = idx + 1
         shop_id = shop_ids[idx % counts["shops"]]
-        first_name = FIRST_NAMES[idx % len(FIRST_NAMES)]
-        surname = SURNAMES[(idx * 5) % len(SURNAMES)]
+        # Zapobiegamy korelacji idx%20 z filtrem po sklepie/statusie.
+        # Dzięki temu w R2 nie pojawia się jedna osoba powtarzana wielokrotnie.
+        per_shop_sequence = row_id // counts["shops"]
+        first_name = FIRST_NAMES[(idx + per_shop_sequence * 7) % len(FIRST_NAMES)]
+        surname = SURNAMES[((idx * 5) + (per_shop_sequence * 11)) % len(SURNAMES)]
         status = USER_STATUSES[idx % len(USER_STATUSES)]
         permission = USER_PERMISSIONS[idx % len(USER_PERMISSIONS)]
         user_id = _stable_uuid("user", row_id)
@@ -134,23 +231,24 @@ def _build_cql(engine_name: str, dataset_size: int) -> str:
         )
 
     books: list[dict[str, str | int | bool]] = []
+    books_by_shop: dict[str, list[dict[str, str | int | bool]]] = {shop_id: [] for shop_id in shop_ids}
     for idx in range(counts["books"]):
         row_id = idx + 1
         shop_id = shop_ids[idx % counts["shops"]]
         first_name = FIRST_NAMES[(idx + 3) % len(FIRST_NAMES)]
         surname = SURNAMES[(idx * 3) % len(SURNAMES)]
-        books.append(
-            {
-                "shop_id": shop_id,
-                "book_id": _stable_uuid("book", row_id),
-                "author": f"{first_name} {surname}",
-                "title": f"Ksiazka {row_id:07d}",
-                "publisher": PUBLISHERS[idx % len(PUBLISHERS)],
-                "publish_date": _iso_date(date(2021, 1, 1), idx % 1500),
-                "pages": 120 + (idx % 380),
-                "is_in_reading_room": "true" if idx % 3 == 0 else "false",
-            }
-        )
+        book = {
+            "shop_id": shop_id,
+            "book_id": _stable_uuid("book", row_id),
+            "author": f"{first_name} {surname}",
+            "title": f"Ksiazka {row_id:07d}",
+            "publisher": PUBLISHERS[idx % len(PUBLISHERS)],
+            "publish_date": _iso_date(date(2021, 1, 1), idx % 1500),
+            "pages": 120 + (idx % 380),
+            "is_in_reading_room": "true" if idx % 3 == 0 else "false",
+        }
+        books.append(book)
+        books_by_shop[shop_id].append(book)
 
     lines: list[str] = [
         f"-- Generated inserts for {engine_name}",
@@ -208,10 +306,35 @@ def _build_cql(engine_name: str, dataset_size: int) -> str:
         )
 
     lines.extend(["", "-- Stage 5: rentals by user and by shop"])
+    rental_users = _active_user_pool(users, activity_ratio=0.35)
+    reservation_users = _active_user_pool(users, activity_ratio=0.45)
+    rental_prefix, rental_total_weight = _build_user_weight_index(rental_users)
+    reservation_prefix, reservation_total_weight = _build_user_weight_index(reservation_users)
+    shop_book_weight_index: dict[str, tuple[list[int], int]] = {
+        shop_id: _build_book_weight_index(shop_books)
+        for shop_id, shop_books in books_by_shop.items()
+    }
     for idx in range(counts["rentals"]):
         row_id = idx + 1
-        user = users[idx % len(users)]
-        book = books[idx % len(books)]
+        # Część użytkowników ma więcej wypożyczeń, ale bez sztywnego cyklu.
+        user = _pick_weighted_user(
+            rental_users,
+            rental_prefix,
+            rental_total_weight,
+            sequence=row_id,
+            salt=17,
+        )
+        shop_id = shop_ids[idx % counts["shops"]]
+        shop_books = books_by_shop[shop_id]
+        book_prefix, book_total_weight = shop_book_weight_index[shop_id]
+        # Część książek będzie wypożyczana wyraźnie częściej w danym sklepie.
+        book = _pick_weighted_book(
+            shop_books,
+            book_prefix,
+            book_total_weight,
+            sequence=row_id,
+            salt=29,
+        )
         shop_employees = employees_by_shop[str(book["shop_id"])]
         employee = shop_employees[idx % len(shop_employees)]
         start_date = _iso_date(date(2024, 1, 1), idx % 365)
@@ -235,7 +358,14 @@ def _build_cql(engine_name: str, dataset_size: int) -> str:
     lines.extend(["", "-- Stage 6: reservations by user"])
     for idx in range(counts["reservations"]):
         row_id = idx + 1
-        user = users[(idx * 3) % len(users)]
+        # Rezerwacje mają osobny rozkład, aby uniknąć identycznych rankingów jak dla wypożyczeń.
+        user = _pick_weighted_user(
+            reservation_users,
+            reservation_prefix,
+            reservation_total_weight,
+            sequence=row_id,
+            salt=53,
+        )
         book = books[(idx * 5) % len(books)]
         when_reserved = _iso_date(date(2024, 6, 1), idx % 240)
         reservation_id = _stable_uuid("reservation", row_id)
