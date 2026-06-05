@@ -6,6 +6,7 @@ services:
     environment:
       ACCEPT_EULA: "y"
       MSSQL_PID: "EnterpriseDeveloper"
+      MSSQL_MEMORY_LIMIT_MB: "${MSSQL_MEMORY_LIMIT_MB:-4096}"
       
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PWD:?}"
     healthcheck:

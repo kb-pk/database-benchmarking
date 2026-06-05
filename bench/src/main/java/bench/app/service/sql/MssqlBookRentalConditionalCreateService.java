@@ -22,7 +22,7 @@ public class MssqlBookRentalConditionalCreateService {
             FROM bench.BookShopUser u
             JOIN bench.ActivationStatus s ON s.id = u.isActiveId
             WHERE u.id = ?
-              AND UPPER(ISNULL(s.status, '')) = 'ACTIVE'
+                            AND UPPER(LTRIM(RTRIM(REPLACE(ISNULL(s.status, ''), CHAR(13), '')))) = 'ACTIVE'
             """;
 
     private static final String CHECK_BOOK_IN_SHOP = """

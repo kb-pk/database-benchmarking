@@ -1,7 +1,7 @@
 package bench.app.service.sql;
 
 import bench.app.model.common.EngagedUser;
-import bench.app.model.common.UserReservationCount;
+import bench.app.model.common.UserReservationRentalCount;
 import bench.app.repository.sql.postgres.PostgresBookReservationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +19,13 @@ public class PostgresBookReservationStatsService {
     }
 
     @Transactional(readOnly = true, transactionManager = "postgresTransactionManager")
-    public List<UserReservationCount> getTopUsersByReservationCount(long shopId) {
-        return bookReservationRepository.findTopUsersByReservationCount((int) shopId);
+    public List<UserReservationRentalCount> getUsersActivityCountsByShop(long shopId) {
+        return bookReservationRepository.findUsersActivityCountsByShop((int) shopId);
     }
 
     @Transactional(readOnly = true, transactionManager = "postgresTransactionManager")
-    public List<UserReservationCount> getTopUsersByReservationCountGlobal() {
-        return bookReservationRepository.findTopUsersByReservationCountGlobal();
+    public List<UserReservationRentalCount> getUsersActivityCountsGlobal() {
+        return bookReservationRepository.findUsersActivityCountsGlobal();
     }
 
     @Transactional(readOnly = true, transactionManager = "postgresTransactionManager")

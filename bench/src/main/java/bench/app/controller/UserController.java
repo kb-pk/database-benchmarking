@@ -8,7 +8,7 @@ import bench.app.model.common.UserPermissionCreateResult;
 import bench.app.model.common.UserRegistrationCreateResult;
 import bench.app.model.common.UserPermissionUpdateResult;
 import bench.app.model.common.UserGroupShopTransferResult;
-import bench.app.model.common.UserReservationCount;
+import bench.app.model.common.UserReservationRentalCount;
 import bench.app.service.cql.cassandra.CassandraAnalyticsService;
 import bench.app.service.cql.cassandra.CassandraInactiveUserSegmentDeleteService;
 import bench.app.service.cql.cassandra.CassandraUserRegistrationCreateService;
@@ -245,16 +245,16 @@ public class UserController {
 		};
 	}
 
-	// R3: Top użytkownicy wg liczby rezerwacji
-	@GetMapping("/top-by-reservations")
-	public List<UserReservationCount> getTopUsersByReservationCount(
+	// R3: Lista użytkowników z liczbą rezerwacji i wypożyczeń (globalnie)
+	@GetMapping({"/top-by-reservations", "/activity-counts"})
+	public List<UserReservationRentalCount> getUsersActivityCountsGlobal(
 			@RequestParam String db
 	) {
 		return switch (db) {
-			case "POSTGRESQL" -> this.postgresBookReservationStatsService.getTopUsersByReservationCountGlobal();
-			case "MSSQL" -> this.mssqlBookReservationStatsService.getTopUsersByReservationCountGlobal();
-			case "CASSANDRA" -> this.cassandraAnalyticsService.getTopUsersByReservationCountGlobal();
-			case "SCYLLA" -> this.scyllaAnalyticsService.getTopUsersByReservationCountGlobal();
+			case "POSTGRESQL" -> this.postgresBookReservationStatsService.getUsersActivityCountsGlobal();
+			case "MSSQL" -> this.mssqlBookReservationStatsService.getUsersActivityCountsGlobal();
+			case "CASSANDRA" -> this.cassandraAnalyticsService.getUsersActivityCountsGlobal();
+			case "SCYLLA" -> this.scyllaAnalyticsService.getUsersActivityCountsGlobal();
 			default -> throw new IllegalArgumentException("Unsupported db for this endpoint: " + db);
 		};
 	}

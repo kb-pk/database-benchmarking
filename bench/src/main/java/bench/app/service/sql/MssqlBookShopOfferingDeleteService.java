@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.BookShopOfferingSnapshot;
 import bench.app.benchmark.BookShopOfferingSnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.BookShopOfferingDeleteByUserResult;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,13 +42,16 @@ public class MssqlBookShopOfferingDeleteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final BookShopOfferingSnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public MssqlBookShopOfferingDeleteService(
             @Qualifier("mssqlDataSource") DataSource dataSource,
-            BookShopOfferingSnapshotStore snapshotStore
+                        BookShopOfferingSnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "mssqlTransactionManager")
@@ -59,22 +63,15 @@ public class MssqlBookShopOfferingDeleteService {
                         return restoreFromSnapshot(userId);
         }
 
-        List<BookShopOfferingSnapshot> matchedRows = jdbcTemplate.query(
-                SELECT_MATCHING_OFFERINGS,
-                (rs, rowNum) -> new BookShopOfferingSnapshot(
-                        rs.getLong("offering_id"),
-                        rs.getLong("book_id"),
-                        rs.getLong("book_shop_id")
-                ),
-                                userId
-        );
+        List<BookShopOfferingSnapshot> snapshotRows = timingContextHolder.excludeFromTiming(() -> loadMatchingOfferings(userId));
+        List<BookShopOfferingSnapshot> matchedRows = loadMatchingOfferings(userId);
 
         int deletedOfferings = 0;
         for (BookShopOfferingSnapshot row : matchedRows) {
             deletedOfferings += jdbcTemplate.update(DELETE_OFFERING_BY_ID, row.offeringId());
         }
 
-        snapshotStore.save(DB_ENGINE, userId, matchedRows);
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, userId, snapshotRows));
 
         return new BookShopOfferingDeleteByUserResult(
                 userId,
@@ -109,4 +106,16 @@ public class MssqlBookShopOfferingDeleteService {
                 true
         );
     }
+
+        private List<BookShopOfferingSnapshot> loadMatchingOfferings(long userId) {
+                return jdbcTemplate.query(
+                                SELECT_MATCHING_OFFERINGS,
+                                (rs, rowNum) -> new BookShopOfferingSnapshot(
+                                                rs.getLong("offering_id"),
+                                                rs.getLong("book_id"),
+                                                rs.getLong("book_shop_id")
+                                ),
+                                userId
+                );
+        }
 }

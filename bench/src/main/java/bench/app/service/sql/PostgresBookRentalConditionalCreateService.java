@@ -48,7 +48,17 @@ public class PostgresBookRentalConditionalCreateService {
             """;
 
     private static final String INSERT_RENTAL = """
-            INSERT INTO bench.bookrental (id, bookid, userid, employeeid, bookshopid, isreturned, startdate, enddate, rentalmethodid)
+            INSERT INTO bench.bookrental (
+                id,
+                bookid,
+                userid,
+                employeeid,
+                bookshopid,
+                isreturned,
+                startdate,
+                enddate,
+                rentalmethodid
+            )
             VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?)
             """;
 

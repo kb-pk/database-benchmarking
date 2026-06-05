@@ -11,7 +11,7 @@ import bench.app.model.common.UserActivationBulkUpdateResult;
 import bench.app.model.common.UserGroupShopTransferResult;
 import bench.app.model.common.UserPermissionCreateResult;
 import bench.app.model.common.UserPermissionUpdateResult;
-import bench.app.model.common.UserReservationCount;
+import bench.app.model.common.UserReservationRentalCount;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
@@ -72,7 +72,7 @@ public class CassandraAnalyticsService {
         return result;
     }
 
-    public List<UserReservationCount> getTopUsersByReservationCountGlobal() {
+    public List<UserReservationRentalCount> getUsersActivityCountsGlobal() {
         Map<UUID, Long> reservationCounts = new HashMap<>();
         ResultSet reservations = cassandraSession.execute("SELECT user_id FROM reservations_by_user");
         for (Row row : reservations) {
@@ -80,26 +80,51 @@ public class CassandraAnalyticsService {
             reservationCounts.merge(userId, 1L, Long::sum);
         }
 
+        Map<UUID, Long> rentalCounts = new HashMap<>();
+        ResultSet rentals = cassandraSession.execute("SELECT user_id FROM rentals_by_user");
+        for (Row row : rentals) {
+            UUID userId = row.getUuid("user_id");
+            rentalCounts.merge(userId, 1L, Long::sum);
+        }
+
         Map<UUID, UserDetails> usersById = readUsersById();
-        List<UserReservationCount> result = new ArrayList<>();
-        for (Map.Entry<UUID, Long> entry : reservationCounts.entrySet()) {
-            UserDetails user = usersById.get(entry.getKey());
+        List<UserReservationRentalCount> result = new ArrayList<>();
+        for (Map.Entry<UUID, UserDetails> entry : usersById.entrySet()) {
+            UUID userId = entry.getKey();
+            UserDetails user = entry.getValue();
             if (user == null) {
                 continue;
             }
 
-            result.add(new UserReservationCount(
-                    uuidToPositiveLong(entry.getKey()),
+            long reservationCount = reservationCounts.getOrDefault(userId, 0L);
+            long rentalCount = rentalCounts.getOrDefault(userId, 0L);
+            long totalCount = reservationCount + rentalCount;
+            if (totalCount == 0L) {
+                continue;
+            }
+
+            result.add(new UserReservationRentalCount(
+                    uuidToPositiveLong(userId),
                     user.name,
                     user.surname,
-                    entry.getValue()
+                    reservationCount,
+                    rentalCount,
+                    totalCount
             ));
         }
 
         result.sort((a, b) -> {
-            int byCount = Long.compare(b.reservationCount(), a.reservationCount());
+            int byCount = Long.compare(b.totalCount(), a.totalCount());
             if (byCount != 0) {
                 return byCount;
+            }
+            int byReservations = Long.compare(b.reservationCount(), a.reservationCount());
+            if (byReservations != 0) {
+                return byReservations;
+            }
+            int byRentals = Long.compare(b.rentalCount(), a.rentalCount());
+            if (byRentals != 0) {
+                return byRentals;
             }
             return Long.compare(a.userId(), b.userId());
         });

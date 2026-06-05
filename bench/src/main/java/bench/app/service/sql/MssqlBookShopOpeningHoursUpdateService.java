@@ -38,16 +38,19 @@ public class MssqlBookShopOpeningHoursUpdateService {
             LocalTime closesAtMonday,
             boolean restoreAfterUpdate
     ) {
-        MondayHours previousHours = jdbcTemplate.query(
-                SELECT_CURRENT_MONDAY_HOURS_BY_SHOP_ID,
-                rs -> rs.next()
-                        ? new MondayHours(toLocalTime(rs.getTime("opensAtMonday")), toLocalTime(rs.getTime("closesAtMonday")))
-                        : null,
-                shopId
-        );
+        MondayHours previousHours = null;
+        if (restoreAfterUpdate) {
+            previousHours = jdbcTemplate.query(
+                    SELECT_CURRENT_MONDAY_HOURS_BY_SHOP_ID,
+                    rs -> rs.next()
+                            ? new MondayHours(toLocalTime(rs.getTime("opensAtMonday")), toLocalTime(rs.getTime("closesAtMonday")))
+                            : null,
+                    shopId
+            );
 
-        if (previousHours == null) {
-            throw new IllegalArgumentException("Nie znaleziono sklepu lub godzin otwarcia dla shopId=" + shopId);
+            if (previousHours == null) {
+                throw new IllegalArgumentException("Nie znaleziono sklepu lub godzin otwarcia dla shopId=" + shopId);
+            }
         }
 
         int affectedRows = jdbcTemplate.update(
@@ -63,20 +66,21 @@ public class MssqlBookShopOpeningHoursUpdateService {
         LocalTime finalOpensAtMonday = opensAtMonday;
         LocalTime finalClosesAtMonday = closesAtMonday;
         if (restoreAfterUpdate) {
+            MondayHours nonNullPreviousHours = previousHours;
             jdbcTemplate.update(
                     UPDATE_MONDAY_HOURS_BY_SHOP_ID,
-                    Time.valueOf(previousHours.opensAtMonday),
-                    Time.valueOf(previousHours.closesAtMonday),
+                    Time.valueOf(nonNullPreviousHours.opensAtMonday),
+                    Time.valueOf(nonNullPreviousHours.closesAtMonday),
                     shopId
             );
-            finalOpensAtMonday = previousHours.opensAtMonday;
-            finalClosesAtMonday = previousHours.closesAtMonday;
+            finalOpensAtMonday = nonNullPreviousHours.opensAtMonday;
+            finalClosesAtMonday = nonNullPreviousHours.closesAtMonday;
         }
 
         return new BookShopOpeningHoursUpdateResult(
                 shopId,
-                previousHours.opensAtMonday,
-                previousHours.closesAtMonday,
+                previousHours == null ? null : previousHours.opensAtMonday,
+                previousHours == null ? null : previousHours.closesAtMonday,
                 opensAtMonday,
                 closesAtMonday,
                 finalOpensAtMonday,

@@ -1,7 +1,11 @@
 
 from __future__ import annotations
 # Generator insertów do tabeli BookRental
+import csv
 import random
+import re
+from os import PathLike
+from pathlib import Path
 """Generatory plikow SQL z insertami.
 
 Ten modul na tym etapie generuje:
@@ -27,6 +31,39 @@ RELATIONAL_TABLES = (
     "BookRental",
     "BookShopOpeningHours",
 )
+
+RELATIONAL_TABLE_COLUMNS = {
+    "ActivationStatus": ["id", "status"],
+    "UserAccountPermissions": ["id", "permission", "details"],
+    "BookRentalMethod": ["id", "method"],
+    "BookShopUser": ["id", "name", "surname", "phoneNumber", "email", "mainBookShopId", "isActiveId"],
+    "UserCard": ["id", "cardIdNumber", "userId", "isActiveId"],
+    "UserAccount": ["id", "login", "passwordHash", "userId", "permissionsId"],
+    "Employee": ["id", "name", "surname", "phoneNumber", "email", "birthDate", "startedAt", "primaryBookShopId", "primaryBusinessRole"],
+    "BookShop": ["id", "shopName", "address", "email", "managerId", "openingHoursId"],
+    "Book": ["id", "title", "author", "publisher", "publishDate", "pages", "isInReadingRoom", "bookShopId"],
+    "BookShopOffering": ["id", "bookId", "bookShopId"],
+    "BookReservation": ["id", "bookId", "userId", "whenReserved"],
+    "BookRental": ["id", "bookId", "userId", "employeeId", "bookShopId", "isReturned", "startDate", "endDate", "rentalMethodId"],
+    "BookShopOpeningHours": [
+        "id",
+        "opensAtMonday",
+        "closesAtMonday",
+        "opensAtTuesday",
+        "closesAtTuesday",
+        "opensAtWednesday",
+        "closesAtWednesday",
+        "opensAtThursday",
+        "closesAtThursday",
+        "opensAtFriday",
+        "closesAtFriday",
+        "opensAtSaturday",
+        "closesAtSaturday",
+        "opensAtSunday",
+        "closesAtSunday",
+        "bookShopId",
+    ],
+}
 
 ACTIVATION_STATUSES = ["ACTIVE", "INACTIVE", "PENDING", "SUSPENDED", "ARCHIVED"]
 BOOK_RENTAL_METHODS = ["Książkomat", "Wypożyczalnia"]
@@ -123,24 +160,40 @@ def calculate_table_row_counts(total_rows: int, min_users: int = 20, max_users: 
     # Pozostało do podziału
     remaining = total_rows - total_const
     
-    # Podziel 20/80 (uzytkowicy/ksiazki)
+    # Podziel 20/80 (uzytkownicy/ksiazki)
     user_data_rows = remaining // 5
     book_data_rows = remaining - user_data_rows
     
-    # Dla użytkowników: BookShopUser + UserCard (1:1) + UserAccount (1:1) = 3x
-    # Podziel tako aby mieści się w zakresie 20-5000
-    book_shop_user_count = max(min_users, min(max_users, user_data_rows // 3))
+    # Dla użytkowników: BookShopUser + UserCard (1:1) + UserAccount (1:1) = 3x.
+    # Nie przekraczamy budzetu user_data_rows, bo to powodowalo ujemne wolumeny po stronie tabel ksiazkowych.
+    max_users_by_budget = user_data_rows // 3
+    if max_users_by_budget <= 0:
+        book_shop_user_count = 0
+    else:
+        scaled_max_users = max(max_users, total_rows // 10)
+        if max_users_by_budget >= min_users:
+            book_shop_user_count = min(scaled_max_users, max_users_by_budget)
+        else:
+            book_shop_user_count = max_users_by_budget
+
     user_card_count = book_shop_user_count  # 1:1 zależność
     user_account_count = book_shop_user_count  # 1:1 zależność
+
+    allocated_user_rows = book_shop_user_count * 3
+    # Pozostaly budzet z puli userow przesuwamy do puli ksiazkowej, aby zachowac total_rows.
+    book_data_rows += user_data_rows - allocated_user_rows
     
-    # Dla ksiazek: Book + BookShopOffering + BookReservation + BookRental
-    # Zwiększ udział książek do 60% book_data_rows, reszta na powiązania
-    book_count = (book_data_rows * 60) // 100
-    book_shop_offering_count = book_count  # 1:1 lub wiecej
-    # Reszta na rezerwacje i wypozyczenia
-    remaining_book_data = book_data_rows - book_count - book_shop_offering_count
+    # Dla ksiazek: Book + BookShopOffering + BookReservation + BookRental.
+    # Udzialy sa tak dobrane, zeby suma zawsze byla <= budzetowi.
+    book_count = (book_data_rows * 50) // 100
+    book_shop_offering_count = (book_data_rows * 30) // 100
+    remaining_book_data = max(0, book_data_rows - book_count - book_shop_offering_count)
     book_reservation_count = remaining_book_data // 2
     book_rental_count = remaining_book_data - book_reservation_count
+
+    if book_shop_user_count == 0:
+        book_reservation_count = 0
+        book_rental_count = 0
     
     # BookShopOpeningHours zawsze = BookShop
     book_shop_opening_hours_count = const_counts["BookShop"]
@@ -622,41 +675,283 @@ def generate_book_shop_opening_hours_inserts(row_count: int) -> list[str]:
 
 def generate_book_shop_opening_hours_updates(row_count: int) -> list[str]:
     """Dopina relacje 1:1 miedzy BookShop i BookShopOpeningHours."""
-    lines: list[str] = []
-    for row_id in range(1, row_count + 1):
-        lines.append(
-            "UPDATE bench.BookShop "
-            f"SET openingHoursId = {row_id} WHERE id = {row_id};"
-        )
-        lines.append(
-            "UPDATE bench.BookShopOpeningHours "
-            f"SET bookShopId = {row_id} WHERE id = {row_id};"
-        )
-    return lines
+    if row_count <= 0:
+        return []
+    # Set-based updates keep loader scripts small even for very large datasets.
+    return [
+        "UPDATE bench.BookShop SET openingHoursId = id WHERE id <= (SELECT MAX(id) FROM bench.BookShopOpeningHours);",
+        "UPDATE bench.BookShopOpeningHours SET bookShopId = id;",
+    ]
 
 
 def generate_employee_updates(row_count: int, book_shop_count: int) -> list[str]:
     """Dopina relacje Employee.primaryBookShopId 1:1 do sklepow."""
-    lines: list[str] = []
-    for row_id in range(1, row_count + 1):
-        primary_book_shop_id = ((row_id - 1) % book_shop_count) + 1
-        lines.append(
-            "UPDATE bench.Employee "
-            f"SET primaryBookShopId = {primary_book_shop_id} WHERE id = {row_id};"
-        )
-    return lines
+    if row_count <= 0 or book_shop_count <= 0:
+        return []
+    return [
+        "UPDATE bench.Employee "
+        f"SET primaryBookShopId = ((id - 1) % {book_shop_count}) + 1 "
+        f"WHERE id <= {row_count};"
+    ]
 
 
 def generate_book_shop_user_updates(row_count: int, book_shop_count: int) -> list[str]:
     """Dopina relacje BookShopUser.mainBookShopId do sklepow."""
-    lines: list[str] = []
+    if row_count <= 0 or book_shop_count <= 0:
+        return []
+    return [
+        "UPDATE bench.BookShopUser "
+        f"SET mainBookShopId = ((id - 1) % {book_shop_count}) + 1 "
+        f"WHERE id <= {row_count};"
+    ]
+
+
+def _iter_activation_status_rows(row_count: int):
     for row_id in range(1, row_count + 1):
-        main_book_shop_id = ((row_id - 1) % book_shop_count) + 1
-        lines.append(
-            "UPDATE bench.BookShopUser "
-            f"SET mainBookShopId = {main_book_shop_id} WHERE id = {row_id};"
-        )
-    return lines
+        yield [str(row_id), ACTIVATION_STATUSES[row_id - 1]]
+
+
+def _iter_user_account_permissions_rows(row_count: int):
+    permission_types = [
+        ("WYPOZYCZENIE", "Mozliwosc wypozyczania ksiazek"),
+        ("REZERWACJA_I_WYPOZYCZENIE", "Mozliwosc rezerwacji i wypozyczania ksiazek"),
+        ("ZABLOKOWANE_KONTO", "Konto zablokowane - brak operacji"),
+        ("TYLKO_REZERWACJA", "Mozliwosc tylko rezerwowania ksiazek"),
+        ("PELNY_DOSTEP", "Pelny dostep do wszystkich operacji"),
+    ]
+    for row_id in range(1, row_count + 1):
+        permission, details = permission_types[row_id - 1]
+        yield [str(row_id), permission, details]
+
+
+def _iter_book_rental_method_rows(row_count: int):
+    for row_id in range(1, row_count + 1):
+        yield [str(row_id), BOOK_RENTAL_METHODS[row_id - 1]]
+
+
+def _iter_book_shop_user_rows(row_count: int):
+    first_names = [
+        "Piotr", "Anna", "Krzysztof", "Maria", "Andrzej",
+        "Katarzyna", "Tomasz", "Malgorzata", "Pawel", "Agnieszka",
+        "Jan", "Barbara", "Michal", "Ewa", "Marcin",
+        "Magdalena", "Jakub", "Elzbieta", "Adam", "Joanna",
+    ]
+    surnames = [
+        "Nowak", "Kowalski", "Wisniewski", "Wojcik", "Kowalczyk",
+        "Kaminski", "Lewandowski", "Zielinski", "Szymanski", "Wozniak",
+        "Dabrowski", "Kozlowski", "Mazur", "Jankowski", "Kwiatkowski",
+        "Krawczyk", "Kaczmarek", "Piotrowski", "Grabowski", "Zajac",
+        "Pawlowski", "Michalski", "Krol", "Wieczorek", "Jablonski",
+        "Wrobel", "Nowakowski", "Majewski", "Olszewski", "Stepien",
+        "Malinowski", "Jaworski", "Adamczyk", "Dudek", "Nowicki",
+        "Pawlak", "Witkowski", "Walczak", "Sikora", "Baran",
+    ]
+
+    for row_id in range(1, row_count + 1):
+        name = first_names[(row_id - 1) % len(first_names)]
+        surname = surnames[(row_id * 7 - 1) % len(surnames)]
+        phone_number = f"+48{row_id % 1_000_000_000:09d}"
+        email = f"{name.lower()}.{surname.lower()}{row_id}@poczta.pl"
+        is_active_id = (((row_id - 1) // len(BOOK_SHOPS)) % 5) + 1
+        yield [str(row_id), name, surname, phone_number, email, "", str(is_active_id)]
+
+
+def _iter_user_card_rows(row_count: int):
+    for row_id in range(1, row_count + 1):
+        card_id_number = f"LIB-{row_id // 1000:02d}-{row_id % 1000:04d}"
+        is_active_id = ((row_id - 1) % 5) + 1
+        yield [str(row_id), card_id_number, str(row_id), str(is_active_id)]
+
+
+def _iter_user_account_rows(row_count: int):
+    for row_id in range(1, row_count + 1):
+        login = f"user{row_id:06d}"
+        password_hash = f"sha256${row_id:032x}$abcdef1234567890"
+        permissions_id = ((row_id - 1) % 5) + 1
+        yield [str(row_id), login, password_hash, str(row_id), str(permissions_id)]
+
+
+def _iter_employee_rows(row_count: int):
+    first_names = [
+        "Piotr", "Anna", "Krzysztof", "Maria", "Andrzej",
+        "Katarzyna", "Tomasz", "Malgorzata", "Pawel", "Agnieszka",
+        "Jan", "Barbara", "Michal", "Ewa", "Marcin",
+        "Magdalena", "Jakub", "Elzbieta", "Adam", "Joanna",
+        "Stanislav", "Izabela", "Grzegorz", "Urszula", "Wojciech",
+    ]
+    surnames = [
+        "Nowak", "Kowalski", "Wisniewski", "Wojcik", "Kowalczyk",
+        "Kaminski", "Lewandowski", "Zielinski", "Szymanski", "Wozniak",
+        "Dabrowski", "Kozlowski", "Mazur", "Jankowski", "Kwiatkowski",
+        "Krawczyk", "Kaczmarek", "Piotrowski", "Grabowski", "Zajac",
+        "Pawlowski", "Michalski", "Krol", "Wieczorek", "Jablonski",
+    ]
+    roles = [
+        "Kierownik ksiegarni",
+        "Starszy bibliotekarz",
+        "Specjalista obslugi klienta",
+        "Koordynator zamowien",
+        "Opiekun czytelni",
+        "Administrator systemu",
+        "Sprzątaczka",
+        "Magazynier",
+        "Ochroniarz",
+        "Recepcjonista",
+        "Ksiegowy",
+        "Dyrektor finansowy",
+    ]
+
+    for row_id in range(1, row_count + 1):
+        name = first_names[(row_id - 1) % len(first_names)]
+        surname = surnames[(row_id * 3 - 1) % len(surnames)]
+        phone_number = f"+48{500000000 + row_id:09d}"
+        email = f"pracownik.{name.lower()}.{surname.lower()}{row_id}@bench.local"
+        birth_date = f"{1975 + (row_id % 20):04d}-{((row_id % 12) + 1):02d}-{((row_id % 28) + 1):02d}"
+        started_at = f"{2015 + (row_id % 9):04d}-{((row_id % 12) + 1):02d}-01"
+        primary_role = roles[(row_id - 1) % len(roles)]
+        yield [str(row_id), name, surname, phone_number, email, birth_date, started_at, "", primary_role]
+
+
+def _iter_book_shop_rows(row_count: int):
+    for row_id in range(1, row_count + 1):
+        shop_name, address, email = BOOK_SHOPS[row_id - 1]
+        yield [str(row_id), shop_name, address, email, str(row_id), ""]
+
+
+def _iter_book_rows(row_count: int):
+    authors = [
+        "Isaac Asimov", "Arthur C. Clarke", "Philip K. Dick", "Ursula K. Le Guin",
+        "Douglas Adams", "Ray Bradbury", "Robert Heinlein", "Frank Herbert",
+        "Harlan Ellison", "Kurt Vonnegut", "Andy Weir", "Liu Cixin",
+        "Agatha Christie", "Arthur Conan Doyle", "Marmurek Twain", "Jane Austen",
+        "Charles Dickens", "Leo Tolstoy", "Fyodor Dostoyevsky", "George Orwell",
+    ]
+    titles = [
+        "Foundations Edge", "The Expanse", "Ubik", "The Lathe of Heaven",
+        "The Hitchhiker's Guide", "Fahrenheit 451", "Stranger in a Strange Land", "Dune",
+        "Dangerous Visions", "Slaughterhouse Five", "The Martian", "Three Body Problem",
+        "Murder on the Orient Express", "The Hound of Baskervilles", "Adventures of Huckleberry Finn", "Pride and Prejudice",
+        "Great Expectations", "War and Peace", "Crime and Punishment", "1984",
+        "The Stand", "Neuromancer", "Snow Crash", "The Diamond Age",
+        "Leviathan Wakes", "Caliban's War", "Abaddon's Gate", "The Goblin Emperor",
+        "The Name of the Wind", "Mistborn", "The Way of Kings", "The Poppy War",
+    ]
+    publishers = [
+        "Penguin Books", "Orbit", "Del Rey", "Tor", "Doubleday",
+        "Simon & Schuster", "HarperCollins", "Random House", "Bantam", "Ace",
+        "Baen", "Subterranean Press", "TSR", "Wizards of the Coast", "Valve",
+    ]
+
+    for row_id in range(1, row_count + 1):
+        author = authors[(row_id - 1) % len(authors)]
+        title = titles[(row_id * 5 - 1) % len(titles)]
+        publisher = publishers[(row_id * 3 - 1) % len(publishers)]
+        publish_year = 1950 + (row_id % 75)
+        publish_month = ((row_id % 12) + 1)
+        publish_date = f"{publish_year:04d}-{publish_month:02d}-01"
+        pages = 200 + (row_id % 600)
+        is_in_reading_room = 1 if (row_id % 10) < 3 else 0
+        book_shop_id = ((row_id - 1) % len(BOOK_SHOPS)) + 1
+        yield [str(row_id), title, author, publisher, publish_date, str(pages), str(is_in_reading_room), str(book_shop_id)]
+
+
+def _iter_book_shop_offering_rows(row_count: int, book_count: int, book_shop_count: int):
+    seen_pairs: set[tuple[int, int]] = set()
+    for row_id in range(1, row_count + 1):
+        book_id = ((row_id * 3 - 1) % book_count) + 1
+        book_shop_id = ((row_id * 7 - 1) % book_shop_count) + 1
+        pair = (book_id, book_shop_id)
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        yield [str(row_id), str(book_id), str(book_shop_id)]
+
+
+def _iter_book_reservation_rows(row_count: int, user_count: int, book_count: int):
+    for row_id in range(1, row_count + 1):
+        user_id = _pick_user_id_with_activity_skew(row_id, user_count, activity_ratio=0.2, step=7)
+        book_id = ((row_id * 11 - 1) % book_count) + 1
+        days_ago = (row_id % 180)
+        when_reserved = f"2025-{((12 - (days_ago // 30)) % 12) + 1:02d}-{((days_ago % 28) + 1):02d}"
+        yield [str(row_id), str(book_id), str(user_id), when_reserved]
+
+
+def _iter_book_rental_rows(row_count: int, user_count: int, book_count: int, employee_count: int, book_shop_count: int):
+    for row_id in range(1, row_count + 1):
+        user_id = _pick_user_id_with_activity_skew(row_id, user_count, activity_ratio=0.2, step=11)
+        book_id = ((row_id * 11 - 1) % book_count) + 1
+        employee_id = ((row_id * 5 - 1) % employee_count) + 1
+        book_shop_id = random.randint(1, book_shop_count)
+        rental_method_id = random.randint(1, 2)
+
+        days_ago = (row_id % 1825)
+        start_date = f"2025-{((12 - (days_ago // 30)) % 12) + 1:02d}-{((days_ago % 28) + 1):02d}"
+
+        is_returned = 1 if ((row_id - 1) % 10) < 7 else 0
+        if is_returned:
+            rental_duration_days = 7 + (row_id % 21)
+            end_date = f"2025-{((12 - ((days_ago - rental_duration_days) // 30)) % 12) + 1:02d}-{(((days_ago - rental_duration_days) % 28) + 1):02d}"
+        else:
+            end_date = ""
+
+        yield [str(row_id), str(book_id), str(user_id), str(employee_id), str(book_shop_id), str(is_returned), start_date, end_date, str(rental_method_id)]
+
+
+def _iter_book_shop_opening_hours_rows(row_count: int):
+    for row_id in range(1, row_count + 1):
+        saturday_open = "10:00:00"
+        saturday_close = "14:00:00"
+        sunday_open = "11:00:00" if row_id % 3 == 0 else ""
+        sunday_close = "15:00:00" if row_id % 3 == 0 else ""
+        yield [
+            str(row_id),
+            "09:00:00", "18:00:00", "09:00:00", "18:00:00",
+            "09:00:00", "18:00:00", "09:00:00", "18:00:00",
+            "09:00:00", "18:00:00", saturday_open, saturday_close,
+            sunday_open, sunday_close, str(row_id),
+        ]
+
+
+def write_relational_bulk_csv_files(
+    output_dir: str | PathLike[str],
+    table_row_counts: dict[str, int],
+) -> None:
+    """Zapisuje pliki CSV dla bulk importu bez trzymania calego datasetu w RAM."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    writers = {
+        "ActivationStatus": ("activationstatus.csv", ["id", "status"], _iter_activation_status_rows(table_row_counts["ActivationStatus"])),
+        "UserAccountPermissions": ("useraccountpermissions.csv", ["id", "permission", "details"], _iter_user_account_permissions_rows(table_row_counts["UserAccountPermissions"])),
+        "BookRentalMethod": ("bookrentalmethod.csv", ["id", "method"], _iter_book_rental_method_rows(table_row_counts["BookRentalMethod"])),
+        "BookShopUser": ("bookshopuser.csv", RELATIONAL_TABLE_COLUMNS["BookShopUser"], _iter_book_shop_user_rows(table_row_counts["BookShopUser"])),
+        "UserCard": ("usercard.csv", RELATIONAL_TABLE_COLUMNS["UserCard"], _iter_user_card_rows(table_row_counts["UserCard"])),
+        "UserAccount": ("useraccount.csv", RELATIONAL_TABLE_COLUMNS["UserAccount"], _iter_user_account_rows(table_row_counts["UserAccount"])),
+        "Employee": ("employee.csv", RELATIONAL_TABLE_COLUMNS["Employee"], _iter_employee_rows(table_row_counts["Employee"])),
+        "BookShop": ("bookshop.csv", RELATIONAL_TABLE_COLUMNS["BookShop"], _iter_book_shop_rows(table_row_counts["BookShop"])),
+        "Book": ("book.csv", RELATIONAL_TABLE_COLUMNS["Book"], _iter_book_rows(table_row_counts["Book"])),
+        "BookShopOpeningHours": ("bookshopopeninghours.csv", RELATIONAL_TABLE_COLUMNS["BookShopOpeningHours"], _iter_book_shop_opening_hours_rows(table_row_counts["BookShopOpeningHours"])),
+        "BookShopOffering": ("bookshopoffering.csv", RELATIONAL_TABLE_COLUMNS["BookShopOffering"], _iter_book_shop_offering_rows(table_row_counts["BookShopOffering"], table_row_counts["Book"], table_row_counts["BookShop"])),
+        "BookReservation": ("bookreservation.csv", RELATIONAL_TABLE_COLUMNS["BookReservation"], _iter_book_reservation_rows(table_row_counts["BookReservation"], table_row_counts["BookShopUser"], table_row_counts["Book"])),
+        "BookRental": ("bookrental.csv", RELATIONAL_TABLE_COLUMNS["BookRental"], _iter_book_rental_rows(table_row_counts["BookRental"], table_row_counts["BookShopUser"], table_row_counts["Book"], table_row_counts["Employee"], table_row_counts["BookShop"])),
+    }
+
+    for table_name in RELATIONAL_TABLES:
+        file_name, headers, rows = writers[table_name]
+        csv_path = output_path / file_name
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            writer.writerows(rows)
+
+
+def build_relational_post_load_updates(table_row_counts: dict[str, int]) -> list[str]:
+    """Buduje maly zestaw UPDATE po ladowaniu bulk."""
+    updates: list[str] = []
+    updates.extend(generate_book_shop_opening_hours_updates(table_row_counts["BookShopOpeningHours"]))
+    updates.extend(generate_employee_updates(table_row_counts["Employee"], table_row_counts["BookShop"]))
+    updates.extend(generate_book_shop_user_updates(table_row_counts["BookShopUser"], table_row_counts["BookShop"]))
+    return updates
 
 
 def build_shared_insert_lines(table_row_counts: dict[str, int]) -> list[str]:
@@ -803,3 +1098,112 @@ def generate_relational_sql(
         table_row_counts = resolve_table_row_counts(dataset_size, table_row_overrides)
     
     return "\n".join(build_shared_insert_lines(table_row_counts)) + "\n"
+
+
+def _split_sql_values(payload: str) -> list[str]:
+    """Dzieli liste SQL VALUES po przecinkach z obsluga apostrofow."""
+    parts: list[str] = []
+    buf: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(payload):
+        ch = payload[i]
+        if ch == "'":
+            # SQL escape apostrofu: ''
+            if in_string and i + 1 < len(payload) and payload[i + 1] == "'":
+                buf.append("''")
+                i += 2
+                continue
+            in_string = not in_string
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "," and not in_string:
+            parts.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+
+    if buf:
+        parts.append("".join(buf).strip())
+    return parts
+
+
+def _decode_sql_token(token: str) -> str:
+    """Konwertuje token SQL do wartosci CSV (NULL -> pusty string)."""
+    if token.upper() == "NULL":
+        return ""
+    if token.startswith("'") and token.endswith("'"):
+        return token[1:-1].replace("''", "'")
+    return token
+
+
+def _resolve_table_row_counts(
+    dataset_size: int,
+    table_row_overrides: dict[str, int] | None,
+    total_rows: int | None,
+) -> dict[str, int]:
+    """Wspolny resolver liczebnosci rekordow dla trybu INSERT i BULK."""
+    if total_rows is not None:
+        return calculate_table_row_counts(total_rows)
+    return resolve_table_row_counts(dataset_size, table_row_overrides)
+
+
+def generate_postgresql_copy_script(
+    table_row_counts: dict[str, int],
+    post_load_updates: list[str],
+    import_dir: str = "/tmp/bench_bulk",
+) -> str:
+    """Generuje skrypt SQL z COPY dla PostgreSQL."""
+    lines = [
+        "\\set ON_ERROR_STOP on",
+        "BEGIN;",
+        "",
+    ]
+
+    for table_name in RELATIONAL_TABLES:
+        if table_row_counts.get(table_name, 0) <= 0:
+            continue
+        columns = ", ".join(RELATIONAL_TABLE_COLUMNS[table_name])
+        table_file = table_name.lower()
+        lines.append(
+            f"COPY bench.{table_name} ({columns}) FROM '{import_dir}/{table_file}.csv' WITH (FORMAT csv, HEADER true, NULL '');"
+        )
+
+    lines.append("")
+    lines.extend(post_load_updates)
+    lines.append("")
+    lines.append("COMMIT;")
+    return "\n".join(lines) + "\n"
+
+
+def generate_mssql_bulk_insert_script(
+    table_row_counts: dict[str, int],
+    post_load_updates: list[str],
+    import_dir: str = "/var/opt/mssql/import",
+    batch_size: int = 2000,
+    rows_per_batch: int = 2000,
+) -> str:
+    """Generuje skrypt SQL z BULK INSERT dla MSSQL."""
+    lines = [
+        "SET NOCOUNT ON;",
+        "SET XACT_ABORT ON;",
+        "",
+    ]
+
+    for table_name in RELATIONAL_TABLES:
+        if table_row_counts.get(table_name, 0) <= 0:
+            continue
+        table_file = table_name.lower()
+        lines.append(
+            f"BULK INSERT bench.{table_name} FROM '{import_dir}/{table_file}.csv' "
+            "WITH (FORMAT = 'CSV', FIRSTROW = 2, FIELDQUOTE = '\"', "
+            f"FIELDTERMINATOR = ',', ROWTERMINATOR = '0x0a', KEEPNULLS, BATCHSIZE = {batch_size}, ROWS_PER_BATCH = {rows_per_batch});"
+        )
+
+    lines.append("")
+    lines.extend(post_load_updates)
+    lines.append("")
+    return "\n".join(lines) + "\n"

@@ -8,6 +8,7 @@ out/
 mvnw
 mvnw.cmd
 .mvn/
-
+*/unknown/ 
+output_data/
 # docker
 .env

@@ -10,6 +10,7 @@ public record RequestTimingSnapshot(
         String path,
         String operationLabel,
         Integer iteration,
+        Integer warmupIterations,
         String dbEngine,
         int httpStatus,
         double totalElapsedMillis,

@@ -1,0 +1,391 @@
+Instrukcja importu danych testowych (database-benchmarking)
+
+0) Przygotowanie (wykonaj raz w terminalu)
+cd /home/user/Projects/database-benchmarking
+set -euo pipefail
+set -a
+source .env
+set +a
+PROJECT_DIR="$(pwd)"
+
+# Domyslki, jesli zmienne nie sa ustawione w biezacej sesji:
+: "${POSTGRES_USER:=postgres}"
+: "${POSTGRES_DB:=bench}"
+export POSTGRES_USER POSTGRES_DB
+
+# Wygeneruj paczki BULK (CSV + skrypty ladowania) dla relacyjnych silnikow:
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine postgresql -relational-load-mode bulk
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine mssql -relational-load-mode bulk -mssql-batch-size 2000 -mssql-rows-per-batch 2000
+
+# Dla NoSQL tez mozna generowac paczki COPY (CSV + loader cqlsh):
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine cassandra -nosql-load-mode bulk
+python3 data_generator/generate_inserts.py -total-rows 500000 -engine scylla -nosql-load-mode bulk
+
+# Dla duzych importow 1M+ warto ograniczyc pamiec SQL Server (wymaga restartu kontenera):
+export MSSQL_MEMORY_LIMIT_MB=4096
+docker compose up -d --force-recreate mssql
+
+
+============================================================
+CZYSZCZENIE BAZ DANYCH (reset do pustego stanu)
+============================================================
+
+PostgreSQL:
+  docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "DROP SCHEMA IF EXISTS bench CASCADE; CREATE SCHEMA bench;"
+
+MSSQL:
+  docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd \
+    -S localhost -C -U sa -P "$MSSQL_SA_PWD" -b \
+    -Q "IF DB_ID(N'bench') IS NOT NULL BEGIN ALTER DATABASE bench SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE bench; END; CREATE DATABASE bench;"
+
+Cassandra:
+  docker compose exec -T cassandra cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" \
+    -e "DROP KEYSPACE IF EXISTS bench;"
+
+Scylla:
+  docker compose exec -T scylla cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" \
+    -e "DROP KEYSPACE IF EXISTS bench;"
+
+Uwaga: po DROP keyspace/schema nalezy ponownie wgrac schemat (create_schema*.sql / create_schema.cql)
+zanim wgrasz inserty.
+
+
+============================================================
+CZYSZCZENIE MIEDZY POEJSCIAMI
+============================================================
+
+Po zakonczeniu jednej bazy i przed uruchomieniem nastepnej warto wykonac:
+
+  docker compose stop postgres
+  docker compose stop mssql
+  docker compose stop cassandra
+  docker compose stop scylla
+
+Jesli chcesz usunac pliki tymczasowe po importach:
+
+  rm -rf /tmp/bench_bulk
+  rm -rf generated_sql/bulk_mssql_500000
+  rm -f /tmp/cass_part_* /tmp/scylla_part_* /tmp/part_with_use.cql
+  docker compose exec -T -u root mssql bash -lc 'rm -rf /var/opt/mssql/import/*'
+  docker compose exec -T postgres bash -lc 'rm -rf /tmp/bench_bulk/*'
+
+To czyszczenie jest szczegolnie przydatne przy przejsciu z PostgreSQL na MSSQL, zeby nie zostaly stare pliki bulk ani importy w kontenerach.
+
+
+============================================================
+LADOWANIE PARTIAMI (gdy WSL resetuje sie przy duzych plikach CQL)
+============================================================
+
+Kiedy uzywac:
+  Tylko gdy normalne docker run z pelnym plikiem .cql powoduje reset WSL lub
+  timeout. Przy plikach 500k wierszy zwykle nie jest potrzebne, przy 1M+ moze
+  byc konieczne.
+
+Kolejnosc dzialan:
+  1. Wyczysic keyspace i wgrac schemat normalnie (patrz sekcje Cassandra/Scylla).
+  2. Podzielic plik insertow na czesci.
+  3. Wgrac czesci kolejno petla.
+
+---- KROK 1: Podziel plik na czesci (100000 linii = ~5MB) ----
+
+  Cassandra:
+    split -l 100000 generated_sql/inserts_cassandra_500000.cql /tmp/cass_part_
+
+  Scylla:
+    split -l 100000 generated_sql/inserts_scylla_500000.cql /tmp/scylla_part_
+
+---- KROK 2: Wgraj czesci kolejno ----
+
+Uwaga: pliki czesciowe nie zawieraja "USE bench;" — trzeba go doklejac przed
+kazdym fragmentem. Ponizsze petle robia to automatycznie.
+
+  Cassandra:
+    for part in $(ls /tmp/cass_part_* | sort); do
+      echo "Laduje: $part"
+      echo "USE bench;" > /tmp/part_with_use.cql
+      cat "$part" >> /tmp/part_with_use.cql
+      docker run --rm --network cassandra \
+        -v "/tmp/part_with_use.cql:/data/part.cql:ro" cassandra:5.0.6 \
+        cqlsh cassandra -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /data/part.cql
+    done
+
+  Scylla:
+    for part in $(ls /tmp/scylla_part_* | sort); do
+      echo "Laduje: $part"
+      echo "USE bench;" > /tmp/part_with_use.cql
+      cat "$part" >> /tmp/part_with_use.cql
+      docker run --rm --network scylla \
+        --entrypoint /opt/scylladb/share/cassandra/bin/cqlsh \
+        -v "/tmp/part_with_use.cql:/data/part.cql:ro" scylladb/scylla:2026.1 \
+        scylla -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /data/part.cql
+    done
+
+---- KROK 3: Kontrola po zakonczeniu petli ----
+
+  docker compose exec -T cassandra cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" \
+    -e "USE bench; SELECT COUNT(*) FROM users;"
+
+---- KROK 4: Czyszczenie plikow tymczasowych ----
+
+  Cassandra:
+    rm -f /tmp/part_with_use.cql
+    for part in /tmp/cass_part_*; do
+      [ -e "$part" ] || continue
+      rm -f "$part"
+    done
+
+  Scylla:
+    rm -f /tmp/part_with_use.cql
+    for part in /tmp/scylla_part_*; do
+      [ -e "$part" ] || continue
+      rm -f "$part"
+    done
+
+
+============================================================
+POSTGRESQL
+============================================================
+
+1) Uruchom tylko postgres:
+docker compose up -d postgres
+
+2) Poczekaj na gotowosc:
+until docker compose exec -T postgres pg_isready -d "$POSTGRES_DB" -U "$POSTGRES_USER" >/dev/null 2>&1; do sleep 2; done
+
+3) Wyczysc schema i utworz od nowa:
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP SCHEMA IF EXISTS bench CASCADE; CREATE SCHEMA bench;"
+
+4) Wgraj strukture:
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /dev/stdin < schema/sql/create_schema_structure.sql
+
+5) Skopiuj paczke BULK do kontenera:
+docker compose cp generated_sql/bulk_postgresql_500000/. postgres:/tmp/bench_bulk
+
+6) Wgraj dane przez COPY:
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/bench_bulk/load_postgresql_copy.sql
+
+7) Kontrola:
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM bench.bookshopuser;"
+
+
+============================================================
+MSSQL
+============================================================
+
+1) Uruchom tylko mssql:
+docker compose up -d mssql
+
+2) Poczekaj na gotowosc:
+until docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -Q "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+
+3) Utworz baze bench (jesli brak):
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -Q "IF DB_ID(N'bench') IS NULL CREATE DATABASE bench;"
+
+4) Wgraj schema bench:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin < schema/sql/create_schema.sql
+
+5) Wgraj strukture:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin < schema/sql/create_schema_structure.sql
+
+6) Skopiuj paczke BULK do kontenera:
+docker compose cp generated_sql/bulk_mssql_500000/. mssql:/var/opt/mssql/import
+
+7) Wgraj dane przez BULK INSERT:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /var/opt/mssql/import/load_mssql_bulk_insert.sql
+
+8) Kontrola:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -Q "SELECT COUNT(*) AS users_count FROM bench.BookShopUser"
+
+
+============================================================
+MSSQL - WARIANT PARTIAMI (gdy WSL wywala sie na duzych CSV)
+============================================================
+
+Uzywaj tego tylko, gdy zwykle BULK INSERT resetuje WSL albo zabija kontener.
+W praktyce pomaga zwlaszcza przy 5M rekordow i na slabiej skonfigurowanym WSL.
+
+Warunek wstepny:
+  Przed krokiem 4 baza `bench` musi istniec i miec wgrany schemat
+  (sekcja MSSQL: kroki 3-5), a pliki musza byc skopiowane do
+  `/var/opt/mssql/import` (krok 3 ponizej). W przeciwnym razie dostaniesz blad
+  "Cannot open database 'bench'" albo "file ... does not exist".
+
+1) Wygeneruj paczke bulk:
+python3 data_generator/generate_inserts.py -total-rows 5000000 -engine mssql -relational-load-mode bulk -mssql-batch-size 1000 -mssql-rows-per-batch 1000
+
+Uwaga: po zmianach generatora odpal ten krok ponownie, zeby odswiezyc `load_mssql_bulk_insert.sql`.
+
+2) Podziel najwieksze tabele na czesci po 50000 wierszy na hoscie:
+cd generated_sql/bulk_mssql_5000000
+for table in book bookshopoffering bookrental bookreservation bookshopuser useraccount usercard employee; do
+  file="$table.csv"
+  [ -f "$file" ] || continue
+  header=$(head -n 1 "$file")
+  tail -n +2 "$file" | split -l 50000 - "$file.part."
+  for part in "$file.part."*; do
+    [ -e "$part" ] || continue
+    mv "$part" "$part.csv"
+    printf '%s\n' "$header" | cat - "$part.csv" > "$part.csv.tmp" && mv "$part.csv.tmp" "$part.csv"
+  done
+  rm -f "$file"
+done
+
+3) Skopiuj podzielona paczke do kontenera:
+docker compose exec -T mssql mkdir -p /var/opt/mssql/import
+docker compose cp . mssql:/var/opt/mssql/import
+
+4) Wgrywaj tabele mniejszymi krokami (bezpieczny wariant bez pułapek quotowania):
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin <<'SQL'
+SET NOCOUNT ON;
+BULK INSERT bench.ActivationStatus
+FROM '/var/opt/mssql/import/activationstatus.csv'
+WITH (FORMAT = 'CSV', FIRSTROW = 2, FIELDQUOTE = '"', FIELDTERMINATOR = ',', ROWTERMINATOR = '0x0a', KEEPNULLS, BATCHSIZE = 5000, ROWS_PER_BATCH = 5000);
+SQL
+
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin <<'SQL'
+SET NOCOUNT ON;
+BULK INSERT bench.UserAccountPermissions
+FROM '/var/opt/mssql/import/useraccountpermissions.csv'
+WITH (FORMAT = 'CSV', FIRSTROW = 2, FIELDQUOTE = '"', FIELDTERMINATOR = ',', ROWTERMINATOR = '0x0a', KEEPNULLS, BATCHSIZE = 5000, ROWS_PER_BATCH = 5000);
+SQL
+
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin <<'SQL'
+SET NOCOUNT ON;
+BULK INSERT bench.BookRentalMethod
+FROM '/var/opt/mssql/import/bookrentalmethod.csv'
+WITH (FORMAT = 'CSV', FIRSTROW = 2, FIELDQUOTE = '"', FIELDTERMINATOR = ',', ROWTERMINATOR = '0x0a', KEEPNULLS, BATCHSIZE = 5000, ROWS_PER_BATCH = 5000);
+SQL
+
+# Pozostale tabele (duze pliki .part.* oraz male CSV):
+bulk_opts="FORMAT = 'CSV', FIRSTROW = 2, FIELDQUOTE = '\"', FIELDTERMINATOR = ',', ROWTERMINATOR = '0x0a', KEEPNULLS, BATCHSIZE = 5000, ROWS_PER_BATCH = 5000"
+
+bulk_insert_single() {
+  local table="$1"
+  local csv_path="$2"
+  docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd \
+    -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b \
+    -Q "SET NOCOUNT ON; BULK INSERT bench.${table} FROM '${csv_path}' WITH (${bulk_opts});"
+}
+
+bulk_insert_parts() {
+  local table="$1"
+  local glob_pattern="$2"
+  local part
+  for part in $(docker compose exec -T mssql bash -lc "ls ${glob_pattern} 2>/dev/null | sort"); do
+    docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd \
+      -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b \
+      -Q "SET NOCOUNT ON; BULK INSERT bench.${table} FROM '${part}' WITH (${bulk_opts});"
+  done
+}
+
+bulk_insert_parts "BookShopUser" "/var/opt/mssql/import/bookshopuser.csv.part.*.csv"
+bulk_insert_parts "UserCard" "/var/opt/mssql/import/usercard.csv.part.*.csv"
+bulk_insert_parts "UserAccount" "/var/opt/mssql/import/useraccount.csv.part.*.csv"
+bulk_insert_parts "Employee" "/var/opt/mssql/import/employee.csv.part.*.csv"
+
+bulk_insert_single "BookShop" "/var/opt/mssql/import/bookshop.csv"
+bulk_insert_parts "Book" "/var/opt/mssql/import/book.csv.part.*.csv"
+bulk_insert_parts "BookShopOffering" "/var/opt/mssql/import/bookshopoffering.csv.part.*.csv"
+bulk_insert_parts "BookReservation" "/var/opt/mssql/import/bookreservation.csv.part.*.csv"
+bulk_insert_parts "BookRental" "/var/opt/mssql/import/bookrental.csv.part.*.csv"
+
+bulk_insert_single "BookShopOpeningHours" "/var/opt/mssql/import/bookshopopeninghours.csv"
+
+# Post-load update jak w load_mssql_bulk_insert.sql:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -b -i /dev/stdin <<'SQL'
+SET NOCOUNT ON;
+UPDATE bench.BookShop SET openingHoursId = id WHERE id <= (SELECT MAX(id) FROM bench.BookShopOpeningHours);
+UPDATE bench.BookShopOpeningHours SET bookShopId = id;
+UPDATE bench.Employee SET primaryBookShopId = ((id - 1) % 10) + 1 WHERE id <= 100;
+UPDATE bench.BookShopUser SET mainBookShopId = ((id - 1) % 10) + 1 WHERE id <= 66658;
+SQL
+
+# Kontrola po zaladowaniu wszystkich tabel:
+docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P "$MSSQL_SA_PWD" -d bench -Q "SET NOCOUNT ON; SELECT COUNT(*) AS users_count FROM bench.BookShopUser;"
+
+Jesli zobaczysz prompt `>`, oznacza to niedomkniety cudzyslow w komendzie shell.
+Przerwij `Ctrl+C` i uruchom ponownie wariant `-i /dev/stdin <<'SQL' ... SQL`.
+
+5) Uwaga:
+Jeśli WSL nadal się wywala, ogranicz pamięć dla SQL Server w Docker Desktop albo zmniejsz porcję do 50000 wierszy.
+
+Jesli chcesz uzyc innego rozmiaru, zamien tylko `500000` na docelowa wartosc i dopasuj nazwe katalogu `generated_sql/bulk_mssql_<rozmiar>`.
+
+
+============================================================
+CASSANDRA
+============================================================
+
+Uwaga: dla stabilnosci WSL preferowany jest wariant COPY z paczki bulk.
+Legacy insert `.cql` zostawiamy jako fallback.
+
+1) Uruchom tylko cassandra:
+docker compose up -d cassandra
+
+2) Poczekaj na gotowosc:
+until docker compose exec -T cassandra cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "DESCRIBE KEYSPACES;" >/dev/null 2>&1; do sleep 3; done
+
+3) Wyczysc keyspace:
+docker compose exec -T cassandra cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "DROP KEYSPACE IF EXISTS bench;"
+
+4) Wgraj schema:
+docker run --rm --network cassandra -v "$PROJECT_DIR/schema/widecolumn:/schema:ro" cassandra:5.0.6 cqlsh cassandra -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /schema/create_schema.cql
+Uwaga: ostrzezenie o replication factor = 3 przy 1 nodzie Cassandra jest oczekiwane i nie przerywa tworzenia schematu.
+
+5) Wgraj dane 500000 (preferowany wariant COPY):
+docker compose exec -T cassandra bash -lc 'rm -rf /tmp/bench_bulk && mkdir -p /tmp/bench_bulk'
+docker compose cp ./generated_sql/bulk_cassandra_500000/. cassandra:/tmp/bench_bulk
+docker compose exec -T cassandra /opt/cassandra/bin/cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /tmp/bench_bulk/load_cassandra_copy.cql
+
+6) Alternatywnie (legacy INSERT):
+docker run --rm --network cassandra -v "$PROJECT_DIR/generated_sql:/data:ro" cassandra:5.0.6 cqlsh cassandra -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /data/inserts_cassandra_500000.cql
+
+7) Kontrola:
+docker compose exec -T cassandra cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "USE bench; SELECT COUNT(*) FROM users;"
+
+
+============================================================
+SCYLLA
+============================================================
+
+1) Uruchom tylko scylla:
+docker compose up -d scylla
+
+2) Poczekaj na gotowosc:
+until docker compose exec -T scylla cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "DESCRIBE KEYSPACES;" >/dev/null 2>&1; do sleep 3; done
+
+3) Wyczysc keyspace:
+docker compose exec -T scylla cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "DROP KEYSPACE IF EXISTS bench;"
+
+4) Wgraj schema:
+  Uwaga: obraz scylladb/scylla ma entrypoint=/usr/bin/scylla — nalezy podac --entrypoint.
+docker run --rm --network scylla --entrypoint /opt/scylladb/share/cassandra/bin/cqlsh \
+  -v "$PROJECT_DIR/schema/widecolumn:/schema:ro" scylladb/scylla:2026.1 \
+  scylla -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /schema/create_schema.cql
+
+5) Wgraj dane 500000 (preferowany wariant COPY):
+docker compose exec -T scylla bash -lc 'rm -rf /tmp/bench_bulk && mkdir -p /tmp/bench_bulk'
+docker compose cp ./generated_sql/bulk_scylla_500000/. scylla:/tmp/bench_bulk
+docker compose exec -T scylla /usr/bin/cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /tmp/bench_bulk/load_scylla_copy.cql
+
+6) Alternatywnie (legacy INSERT):
+docker run --rm --network scylla --entrypoint /opt/scylladb/share/cassandra/bin/cqlsh \
+  -v "$PROJECT_DIR/generated_sql:/data:ro" scylladb/scylla:2026.1 \
+  scylla -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -f /data/inserts_scylla_500000.cql
+
+7) Kontrola:
+docker compose exec -T scylla cqlsh -u "$CASSANDRA_USER" -p "$CASSANDRA_PWD" -e "USE bench; SELECT COUNT(*) FROM users;"
+
+
+============================================================
+Dodatkowe wskazowki stabilnosci
+============================================================
+
+1) Uruchamiaj i importuj silniki pojedynczo (nie wszystkie naraz).
+2) Po imporcie jednego silnika zatrzymaj go i przejdz do nastepnego:
+   docker compose stop postgres
+   docker compose stop mssql
+   docker compose stop cassandra
+   docker compose stop scylla
+3) Jezeli WSL nadal sie resetuje przy CQL, importuj mniejsze porcje pliku (split).

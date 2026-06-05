@@ -11,7 +11,7 @@ import bench.app.model.common.UserActivationBulkUpdateResult;
 import bench.app.model.common.UserGroupShopTransferResult;
 import bench.app.model.common.UserPermissionCreateResult;
 import bench.app.model.common.UserPermissionUpdateResult;
-import bench.app.model.common.UserReservationCount;
+import bench.app.model.common.UserReservationRentalCount;
 import bench.app.service.cql.cassandra.CassandraAnalyticsService;
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -34,8 +34,8 @@ public class ScyllaAnalyticsService {
         return this.delegate.getActiveUsersByShopId(shopId);
     }
 
-    public List<UserReservationCount> getTopUsersByReservationCountGlobal() {
-        return this.delegate.getTopUsersByReservationCountGlobal();
+    public List<UserReservationRentalCount> getUsersActivityCountsGlobal() {
+        return this.delegate.getUsersActivityCountsGlobal();
     }
 
     public List<EmployeeRentalCount> getEmployeeRentalCountsGlobal() {

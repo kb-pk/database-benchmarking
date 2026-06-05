@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.InactiveUserSegmentSnapshot;
 import bench.app.benchmark.InactiveUserSegmentSnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.UserInactiveSegmentDeleteResult;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -127,13 +128,16 @@ public class PostgresInactiveUserSegmentDeleteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final InactiveUserSegmentSnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public PostgresInactiveUserSegmentDeleteService(
             @Qualifier("postgresDataSource") DataSource dataSource,
-            InactiveUserSegmentSnapshotStore snapshotStore
+                        InactiveUserSegmentSnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "postgresTransactionManager")
@@ -153,16 +157,12 @@ public class PostgresInactiveUserSegmentDeleteService {
             return restoreFromSnapshot(monthsThreshold, segmentSize);
         }
 
-        List<Long> candidateIds = jdbcTemplate.query(
-                SELECT_INACTIVE_CANDIDATE_IDS,
-                (rs, rowNum) -> rs.getLong("id"),
-                monthsThreshold,
-                monthsThreshold,
-                monthsThreshold,
-                segmentSize
+        List<Long> snapshotCandidateIds = timingContextHolder.excludeFromTiming(() -> loadCandidateIds(monthsThreshold, segmentSize));
+        List<InactiveUserSegmentSnapshot.InactiveUserSnapshot> snapshots = timingContextHolder.excludeFromTiming(
+                () -> buildSnapshots(snapshotCandidateIds)
         );
 
-        List<InactiveUserSegmentSnapshot.InactiveUserSnapshot> snapshots = new ArrayList<>();
+        List<Long> candidateIds = loadCandidateIds(monthsThreshold, segmentSize);
         int deletedUsers = 0;
         int deletedCards = 0;
         int deletedAccounts = 0;
@@ -170,82 +170,6 @@ public class PostgresInactiveUserSegmentDeleteService {
         int deletedRentals = 0;
 
         for (Long userId : candidateIds) {
-            InactiveUserSegmentSnapshot.UserRow userRow = jdbcTemplate.query(
-                    SELECT_USER_BY_ID,
-                    rs -> rs.next() ? new InactiveUserSegmentSnapshot.UserRow(
-                            rs.getLong("id"),
-                            rs.getString("name"),
-                            rs.getString("surname"),
-                            rs.getString("phonenumber"),
-                            rs.getString("email"),
-                            rs.getObject("mainbookshopid") == null ? null : rs.getLong("mainbookshopid"),
-                            rs.getLong("isactiveid")
-                    ) : null,
-                    userId
-            );
-
-            if (userRow == null) {
-                continue;
-            }
-
-            List<InactiveUserSegmentSnapshot.UserCardRow> cards = jdbcTemplate.query(
-                    SELECT_CARDS_BY_USER_ID,
-                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.UserCardRow(
-                            rs.getLong("id"),
-                            rs.getString("cardidnumber"),
-                            rs.getObject("userid") == null ? null : rs.getLong("userid"),
-                            rs.getLong("isactiveid")
-                    ),
-                    userId
-            );
-
-            List<InactiveUserSegmentSnapshot.UserAccountRow> accounts = jdbcTemplate.query(
-                    SELECT_ACCOUNTS_BY_USER_ID,
-                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.UserAccountRow(
-                            rs.getLong("id"),
-                            rs.getString("login"),
-                            rs.getString("passwordhash"),
-                            rs.getLong("userid"),
-                            rs.getLong("permissionsid")
-                    ),
-                    userId
-            );
-
-            List<InactiveUserSegmentSnapshot.BookReservationRow> reservations = jdbcTemplate.query(
-                    SELECT_RESERVATIONS_BY_USER_ID,
-                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.BookReservationRow(
-                            rs.getLong("id"),
-                            rs.getLong("bookid"),
-                            rs.getLong("userid"),
-                            rs.getDate("whenreserved").toLocalDate()
-                    ),
-                    userId
-            );
-
-            List<InactiveUserSegmentSnapshot.BookRentalRow> rentals = jdbcTemplate.query(
-                    SELECT_RENTALS_BY_USER_ID,
-                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.BookRentalRow(
-                            rs.getLong("id"),
-                            rs.getLong("bookid"),
-                            rs.getLong("userid"),
-                            rs.getLong("employeeid"),
-                            rs.getLong("bookshopid"),
-                            rs.getInt("isreturned") != 0,
-                            rs.getDate("startdate").toLocalDate(),
-                            rs.getDate("enddate") == null ? null : rs.getDate("enddate").toLocalDate(),
-                            rs.getLong("rentalmethodid")
-                    ),
-                    userId
-            );
-
-            snapshots.add(new InactiveUserSegmentSnapshot.InactiveUserSnapshot(
-                    userRow,
-                    cards,
-                    accounts,
-                    reservations,
-                    rentals
-            ));
-
             deletedCards += jdbcTemplate.update(DELETE_USER_CARDS, userId);
             deletedAccounts += jdbcTemplate.update(DELETE_USER_ACCOUNTS, userId);
             deletedReservations += jdbcTemplate.update(DELETE_USER_RESERVATIONS, userId);
@@ -253,7 +177,7 @@ public class PostgresInactiveUserSegmentDeleteService {
             deletedUsers += jdbcTemplate.update(DELETE_USER, userId);
         }
 
-        snapshotStore.save(DB_ENGINE, monthsThreshold, segmentSize, new InactiveUserSegmentSnapshot(List.copyOf(snapshots)));
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, segmentSize, new InactiveUserSegmentSnapshot(List.copyOf(snapshots))));
 
         return new UserInactiveSegmentDeleteResult(
                 monthsThreshold,
@@ -361,5 +285,100 @@ public class PostgresInactiveUserSegmentDeleteService {
                 restoredRentals,
                 true
         );
+    }
+
+    private List<Long> loadCandidateIds(int monthsThreshold, int segmentSize) {
+        return jdbcTemplate.query(
+                SELECT_INACTIVE_CANDIDATE_IDS,
+                (rs, rowNum) -> rs.getLong("id"),
+                monthsThreshold,
+                monthsThreshold,
+                monthsThreshold,
+                segmentSize
+        );
+    }
+
+    private List<InactiveUserSegmentSnapshot.InactiveUserSnapshot> buildSnapshots(List<Long> candidateIds) {
+        List<InactiveUserSegmentSnapshot.InactiveUserSnapshot> snapshots = new ArrayList<>();
+
+        for (Long userId : candidateIds) {
+            InactiveUserSegmentSnapshot.UserRow userRow = jdbcTemplate.query(
+                    SELECT_USER_BY_ID,
+                    rs -> rs.next() ? new InactiveUserSegmentSnapshot.UserRow(
+                            rs.getLong("id"),
+                            rs.getString("name"),
+                            rs.getString("surname"),
+                            rs.getString("phonenumber"),
+                            rs.getString("email"),
+                            rs.getObject("mainbookshopid") == null ? null : rs.getLong("mainbookshopid"),
+                            rs.getLong("isactiveid")
+                    ) : null,
+                    userId
+            );
+
+            if (userRow == null) {
+                continue;
+            }
+
+            List<InactiveUserSegmentSnapshot.UserCardRow> cards = jdbcTemplate.query(
+                    SELECT_CARDS_BY_USER_ID,
+                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.UserCardRow(
+                            rs.getLong("id"),
+                            rs.getString("cardidnumber"),
+                            rs.getObject("userid") == null ? null : rs.getLong("userid"),
+                            rs.getLong("isactiveid")
+                    ),
+                    userId
+            );
+
+            List<InactiveUserSegmentSnapshot.UserAccountRow> accounts = jdbcTemplate.query(
+                    SELECT_ACCOUNTS_BY_USER_ID,
+                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.UserAccountRow(
+                            rs.getLong("id"),
+                            rs.getString("login"),
+                            rs.getString("passwordhash"),
+                            rs.getLong("userid"),
+                            rs.getLong("permissionsid")
+                    ),
+                    userId
+            );
+
+            List<InactiveUserSegmentSnapshot.BookReservationRow> reservations = jdbcTemplate.query(
+                    SELECT_RESERVATIONS_BY_USER_ID,
+                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.BookReservationRow(
+                            rs.getLong("id"),
+                            rs.getLong("bookid"),
+                            rs.getLong("userid"),
+                            rs.getDate("whenreserved").toLocalDate()
+                    ),
+                    userId
+            );
+
+            List<InactiveUserSegmentSnapshot.BookRentalRow> rentals = jdbcTemplate.query(
+                    SELECT_RENTALS_BY_USER_ID,
+                    (rs, rowNum) -> new InactiveUserSegmentSnapshot.BookRentalRow(
+                            rs.getLong("id"),
+                            rs.getLong("bookid"),
+                            rs.getLong("userid"),
+                            rs.getLong("employeeid"),
+                            rs.getLong("bookshopid"),
+                            rs.getInt("isreturned") != 0,
+                            rs.getDate("startdate").toLocalDate(),
+                            rs.getDate("enddate") == null ? null : rs.getDate("enddate").toLocalDate(),
+                            rs.getLong("rentalmethodid")
+                    ),
+                    userId
+            );
+
+            snapshots.add(new InactiveUserSegmentSnapshot.InactiveUserSnapshot(
+                    userRow,
+                    cards,
+                    accounts,
+                    reservations,
+                    rentals
+            ));
+        }
+
+        return snapshots;
     }
 }

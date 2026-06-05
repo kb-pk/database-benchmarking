@@ -12,8 +12,21 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from nosql_insert_generators import generate_cassandra_cql, generate_scylla_cql
-from sql_insert_generators import generate_relational_sql
+from nosql_insert_generators import (
+    generate_cassandra_copy_script,
+    generate_scylla_copy_script,
+    write_cassandra_cql_file,
+    write_nosql_bulk_csv_files,
+    write_scylla_cql_file,
+)
+from sql_insert_generators import (
+    build_relational_post_load_updates,
+    calculate_table_row_counts,
+    generate_mssql_bulk_insert_script,
+    generate_postgresql_copy_script,
+    write_relational_bulk_csv_files,
+    generate_relational_sql,
+)
 
 
 DATASET_OPTIONS = {
@@ -73,6 +86,32 @@ def parse_args() -> argparse.Namespace:
         default=Path("generated_sql"),
         help="Katalog wyjsciowy na wygenerowane pliki SQL.",
     )
+    parser.add_argument(
+        "-relational-load-mode",
+        type=str,
+        default="inserts",
+        choices=("inserts", "bulk"),
+        help="Tryb dla PostgreSQL/MSSQL: inserts (domyslnie) albo bulk (CSV + COPY/BULK INSERT).",
+    )
+    parser.add_argument(
+        "-mssql-batch-size",
+        type=int,
+        default=2000,
+        help="Rozmiar BATCHSIZE dla MSSQL BULK INSERT (domyslnie 2000).",
+    )
+    parser.add_argument(
+        "-mssql-rows-per-batch",
+        type=int,
+        default=2000,
+        help="Rozmiar ROWS_PER_BATCH dla MSSQL BULK INSERT (domyslnie 2000).",
+    )
+    parser.add_argument(
+        "-nosql-load-mode",
+        type=str,
+        default="inserts",
+        choices=("inserts", "bulk"),
+        help="Tryb dla Cassandra/Scylla: inserts (domyslnie) albo bulk (CSV + COPY).",
+    )
     return parser.parse_args()
 
 
@@ -108,25 +147,90 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     if engine_family == "relational":
+        if args.relational_load_mode == "bulk":
+            bundle_dir = args.output_dir / f"bulk_{args.engine}_{dataset_size_for_output}"
+            if use_total_rows:
+                table_row_counts = calculate_table_row_counts(args.total_rows)
+            else:
+                raise ValueError("Tryb bulk wymaga -total-rows")
+
+            write_relational_bulk_csv_files(bundle_dir, table_row_counts)
+            post_load_updates = build_relational_post_load_updates(table_row_counts)
+
+            if args.engine == "postgresql":
+                loader_path = bundle_dir / "load_postgresql_copy.sql"
+                loader_path.write_text(
+                    generate_postgresql_copy_script(table_row_counts, post_load_updates),
+                    encoding="utf-8",
+                )
+            elif args.engine == "mssql":
+                loader_path = bundle_dir / "load_mssql_bulk_insert.sql"
+                loader_path.write_text(
+                    generate_mssql_bulk_insert_script(
+                        table_row_counts,
+                        post_load_updates,
+                        batch_size=args.mssql_batch_size,
+                        rows_per_batch=args.mssql_rows_per_batch,
+                    ),
+                    encoding="utf-8",
+                )
+            else:
+                raise ValueError(f"Bulk mode nie jest wspierany dla silnika: {args.engine}")
+
+            print(f"- Pakiet BULK zapisany w: {bundle_dir}")
+            print(f"- Skrypt ladowania: {loader_path}")
+            print("\nSzkielet generatora zostal uruchomiony poprawnie.")
+            return
+
         if use_total_rows:
             generated_content = generate_relational_sql(args.size or 0, None, args.total_rows)
         else:
             generated_content = generate_relational_sql(args.size, None)
         file_extension = "sql"
     elif engine_family == "cassandra":
-        generated_content = generate_cassandra_cql(dataset_size_for_output, None)
+        if args.nosql_load_mode == "inserts" and dataset_size_for_output >= 2_000_000:
+            print("WARNING: Dla Cassandra i bardzo duzych zbiorow inserts moze zacinac proces.")
+            print("WARNING: Automatycznie przelaczam -nosql-load-mode na bulk.")
+            args.nosql_load_mode = "bulk"
+
+        if args.nosql_load_mode == "bulk":
+            bundle_dir = args.output_dir / f"bulk_{args.engine}_{dataset_size_for_output}"
+            write_nosql_bulk_csv_files(bundle_dir, dataset_size_for_output)
+            loader_path = bundle_dir / "load_cassandra_copy.cql"
+            loader_path.write_text(generate_cassandra_copy_script(dataset_size_for_output), encoding="utf-8")
+            print(f"- Pakiet BULK zapisany w: {bundle_dir}")
+            print(f"- Skrypt ladowania: {loader_path}")
+            print("\nSzkielet generatora zostal uruchomiony poprawnie.")
+            return
+        output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.cql"
+        write_cassandra_cql_file(output_path, dataset_size_for_output, None)
         file_extension = "cql"
     elif engine_family == "scylla":
-        generated_content = generate_scylla_cql(dataset_size_for_output, None)
+        if args.nosql_load_mode == "inserts" and dataset_size_for_output >= 2_000_000:
+            print("WARNING: Dla Scylla i bardzo duzych zbiorow inserts moze zacinac proces.")
+            print("WARNING: Automatycznie przelaczam -nosql-load-mode na bulk.")
+            args.nosql_load_mode = "bulk"
+
+        if args.nosql_load_mode == "bulk":
+            bundle_dir = args.output_dir / f"bulk_{args.engine}_{dataset_size_for_output}"
+            write_nosql_bulk_csv_files(bundle_dir, dataset_size_for_output)
+            loader_path = bundle_dir / "load_scylla_copy.cql"
+            loader_path.write_text(generate_scylla_copy_script(dataset_size_for_output), encoding="utf-8")
+            print(f"- Pakiet BULK zapisany w: {bundle_dir}")
+            print(f"- Skrypt ladowania: {loader_path}")
+            print("\nSzkielet generatora zostal uruchomiony poprawnie.")
+            return
+        output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.cql"
+        write_scylla_cql_file(output_path, dataset_size_for_output, None)
         file_extension = "cql"
     else:
         raise ValueError(f"Unsupported engine family: {engine_family}")
 
-    output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.{file_extension}"
-    output_path.write_text(generated_content, encoding="utf-8")
-    print(f"- Plik wynikowy: {output_path}")
-    
-    print("\nSzkielet generatora zostal uruchomiony poprawnie.")
+    if engine_family == "relational":
+        output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.{file_extension}"
+        output_path.write_text(generated_content, encoding="utf-8")
+    else:
+        output_path = args.output_dir / f"inserts_{args.engine}_{dataset_size_for_output}.{file_extension}"
 
     print(f"- Plik wynikowy: {output_path}")
     print("\nSzkielet generatora zostal uruchomiony poprawnie.")

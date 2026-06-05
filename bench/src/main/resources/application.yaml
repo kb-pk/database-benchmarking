@@ -11,7 +11,7 @@ spring:
       hibernate:
         default_schema: bench
     hibernate:
-      ddl-auto: update #validate
+      ddl-auto: none
     show-sql: false
 
   cassandra:

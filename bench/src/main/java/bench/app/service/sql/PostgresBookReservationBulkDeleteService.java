@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.BookReservationBulkSnapshot;
 import bench.app.benchmark.BookReservationBulkSnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.BookReservationBulkDeleteResult;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -51,13 +52,16 @@ public class PostgresBookReservationBulkDeleteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final BookReservationBulkSnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public PostgresBookReservationBulkDeleteService(
             @Qualifier("postgresDataSource") DataSource dataSource,
-            BookReservationBulkSnapshotStore snapshotStore
+                        BookReservationBulkSnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "postgresTransactionManager")
@@ -70,19 +74,11 @@ public class PostgresBookReservationBulkDeleteService {
             return restoreFromSnapshot(monthsThreshold);
         }
 
-        List<BookReservationBulkSnapshot> matchedRows = jdbcTemplate.query(
-                SELECT_MATCHING_RESERVATIONS,
-                (rs, rowNum) -> new BookReservationBulkSnapshot(
-                        rs.getLong("reservation_id"),
-                        rs.getLong("book_id"),
-                        rs.getLong("user_id"),
-                        rs.getDate("when_reserved").toLocalDate()
-                ),
-                monthsThreshold
-        );
+        List<BookReservationBulkSnapshot> snapshotRows = timingContextHolder.excludeFromTiming(() -> loadMatchingReservations(monthsThreshold));
+        List<BookReservationBulkSnapshot> matchedRows = loadMatchingReservations(monthsThreshold);
 
         int deletedRows = jdbcTemplate.update(DELETE_MATCHING_RESERVATIONS, monthsThreshold);
-        snapshotStore.save(DB_ENGINE, monthsThreshold, matchedRows);
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, snapshotRows));
 
         return new BookReservationBulkDeleteResult(
                 monthsThreshold,
@@ -118,4 +114,17 @@ public class PostgresBookReservationBulkDeleteService {
                 true
         );
     }
+
+        private List<BookReservationBulkSnapshot> loadMatchingReservations(int monthsThreshold) {
+                return jdbcTemplate.query(
+                                SELECT_MATCHING_RESERVATIONS,
+                                (rs, rowNum) -> new BookReservationBulkSnapshot(
+                                                rs.getLong("reservation_id"),
+                                                rs.getLong("book_id"),
+                                                rs.getLong("user_id"),
+                                                rs.getDate("when_reserved").toLocalDate()
+                                ),
+                                monthsThreshold
+                );
+        }
 }

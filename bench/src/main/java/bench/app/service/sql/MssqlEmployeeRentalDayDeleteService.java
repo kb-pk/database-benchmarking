@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.EmployeeRentalDaySnapshot;
 import bench.app.benchmark.EmployeeRentalDaySnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.EmployeeRentalDayDeleteResult;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,13 +47,16 @@ public class MssqlEmployeeRentalDayDeleteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final EmployeeRentalDaySnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public MssqlEmployeeRentalDayDeleteService(
             @Qualifier("mssqlDataSource") DataSource dataSource,
-            EmployeeRentalDaySnapshotStore snapshotStore
+                        EmployeeRentalDaySnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "mssqlTransactionManager")
@@ -65,22 +69,8 @@ public class MssqlEmployeeRentalDayDeleteService {
             return restoreFromSnapshot(employeeId, rentalDate);
         }
 
-        List<EmployeeRentalDaySnapshot> matchedRows = jdbcTemplate.query(
-                SELECT_MATCHING_RENTALS,
-                (rs, rowNum) -> new EmployeeRentalDaySnapshot(
-                        rs.getLong("rental_id"),
-                        rs.getLong("book_id"),
-                        rs.getLong("user_id"),
-                        rs.getLong("employee_id"),
-                        rs.getLong("book_shop_id"),
-                        rs.getLong("rental_method_id"),
-                        rs.getInt("is_returned") != 0,
-                        rs.getDate("start_date").toLocalDate(),
-                        rs.getDate("end_date") == null ? null : rs.getDate("end_date").toLocalDate()
-                ),
-                employeeId,
-                Date.valueOf(rentalDate)
-        );
+        List<EmployeeRentalDaySnapshot> snapshotRows = timingContextHolder.excludeFromTiming(() -> loadMatchingRentals(employeeId, rentalDate));
+        List<EmployeeRentalDaySnapshot> matchedRows = loadMatchingRentals(employeeId, rentalDate);
 
         int deletedRows = jdbcTemplate.update(
                 DELETE_MATCHING_RENTALS,
@@ -88,7 +78,7 @@ public class MssqlEmployeeRentalDayDeleteService {
                 Date.valueOf(rentalDate)
         );
 
-        snapshotStore.save(DB_ENGINE, employeeId, rentalDate, matchedRows);
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, employeeId, rentalDate, snapshotRows));
 
         return new EmployeeRentalDayDeleteResult(
                 employeeId,
@@ -133,4 +123,23 @@ public class MssqlEmployeeRentalDayDeleteService {
                 true
         );
     }
+
+        private List<EmployeeRentalDaySnapshot> loadMatchingRentals(long employeeId, LocalDate rentalDate) {
+                return jdbcTemplate.query(
+                                SELECT_MATCHING_RENTALS,
+                                (rs, rowNum) -> new EmployeeRentalDaySnapshot(
+                                                rs.getLong("rental_id"),
+                                                rs.getLong("book_id"),
+                                                rs.getLong("user_id"),
+                                                rs.getLong("employee_id"),
+                                                rs.getLong("book_shop_id"),
+                                                rs.getLong("rental_method_id"),
+                                                rs.getInt("is_returned") != 0,
+                                                rs.getDate("start_date").toLocalDate(),
+                                                rs.getDate("end_date") == null ? null : rs.getDate("end_date").toLocalDate()
+                                ),
+                                employeeId,
+                                Date.valueOf(rentalDate)
+                );
+        }
 }

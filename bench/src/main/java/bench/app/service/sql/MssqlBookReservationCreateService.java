@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.BookReservationSnapshot;
 import bench.app.benchmark.BookReservationSnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.BookReservationCreateResult;
 import bench.app.model.common.BookReservationDeleteResult;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,21 +18,17 @@ import java.time.LocalDate;
 public class MssqlBookReservationCreateService {
     private static final String DB_ENGINE = "MSSQL";
 
-    private static final String SELECT_NEXT_RESERVATION_ID = """
-            SELECT ISNULL(MAX(id), 0) + 1 AS next_id
+    private static final String SELECT_LAST_RESERVATION_ID = """
+            SELECT TOP 1 id
             FROM bench.BookReservation
+            ORDER BY id DESC
             """;
 
-    private static final String CHECK_BOOK_EXISTS = """
-            SELECT COUNT(*)
-            FROM bench.Book
-            WHERE id = ?
-            """;
-
-    private static final String CHECK_USER_EXISTS = """
-            SELECT COUNT(*)
-            FROM bench.BookShopUser
-            WHERE id = ?
+    private static final String INSERT_RESERVATION_IF_EXISTS = """
+            INSERT INTO bench.BookReservation (id, bookId, userId, whenReserved)
+            SELECT ?, ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM bench.Book WHERE id = ?)
+              AND EXISTS (SELECT 1 FROM bench.BookShopUser WHERE id = ?)
             """;
 
     private static final String INSERT_RESERVATION = """
@@ -52,40 +49,35 @@ public class MssqlBookReservationCreateService {
 
     private final JdbcTemplate jdbcTemplate;
     private final BookReservationSnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public MssqlBookReservationCreateService(
             @Qualifier("mssqlDataSource") DataSource dataSource,
-            BookReservationSnapshotStore snapshotStore
+                        BookReservationSnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "mssqlTransactionManager")
     public BookReservationCreateResult createReservation(long bookId, long userId, LocalDate whenReserved, boolean restoreAfterCreate) {
-        if (!exists(CHECK_BOOK_EXISTS, bookId)) {
-            throw new IllegalArgumentException("Książka o podanym bookId nie istnieje");
-        }
-        if (!exists(CHECK_USER_EXISTS, userId)) {
-            throw new IllegalArgumentException("Użytkownik o podanym userId nie istnieje");
-        }
-
-        Long reservationId = jdbcTemplate.query(
-                SELECT_NEXT_RESERVATION_ID,
-                rs -> rs.next() ? rs.getLong("next_id") : null
-        );
-        if (reservationId == null) {
-            throw new IllegalArgumentException("Nie udało się ustalić nowego id rezerwacji");
-        }
+        long reservationId = findNextReservationId();
 
         LocalDate effectiveDate = whenReserved == null ? LocalDate.now() : whenReserved;
         int insertedRows = jdbcTemplate.update(
-                INSERT_RESERVATION,
+                                INSERT_RESERVATION_IF_EXISTS,
                 reservationId,
                 bookId,
                 userId,
-                Date.valueOf(effectiveDate)
+                                Date.valueOf(effectiveDate),
+                                bookId,
+                                userId
         );
+                if (insertedRows == 0) {
+                        throw new IllegalArgumentException("Nie można utworzyć rezerwacji: nie istnieje bookId albo userId");
+                }
 
         int deletedRows = 0;
         boolean existsAfterOperation = true;
@@ -112,10 +104,10 @@ public class MssqlBookReservationCreateService {
             return restoreReservationFromSnapshot(reservationId);
         }
 
-        BookReservationSnapshot snapshot = readReservationSnapshot(reservationId);
+        BookReservationSnapshot snapshot = timingContextHolder.excludeFromTiming(() -> readReservationSnapshot(reservationId));
 
         int deletedRows = jdbcTemplate.update(DELETE_RESERVATION, reservationId);
-        snapshotStore.save(DB_ENGINE, reservationId, snapshot);
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, reservationId, snapshot));
 
         return new BookReservationDeleteResult(
                 reservationId,
@@ -171,8 +163,11 @@ public class MssqlBookReservationCreateService {
         return new BookReservationSnapshot(bookId, userId, whenReserved);
     }
 
-    private boolean exists(String sql, long id) {
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, id);
-        return count != null && count > 0;
-    }
+        private long findNextReservationId() {
+                Long lastId = jdbcTemplate.query(
+                                SELECT_LAST_RESERVATION_ID,
+                                rs -> rs.next() ? rs.getLong("id") : null
+                );
+                return lastId == null ? 1L : lastId + 1L;
+        }
 }

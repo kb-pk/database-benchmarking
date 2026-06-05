@@ -14,7 +14,7 @@ public class MssqlUserActivationUpdateService {
     private static final String SELECT_INACTIVE_STATUS_ID = """
             SELECT TOP 1 a.id
             FROM bench.ActivationStatus a
-            WHERE UPPER(a.status) = 'INACTIVE'
+            WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(a.status, ''), CHAR(13), '')))) = 'INACTIVE'
             ORDER BY a.id
             """;
 
@@ -22,7 +22,7 @@ public class MssqlUserActivationUpdateService {
             SELECT u.id, u.isActiveId
             FROM bench.BookShopUser u
             JOIN bench.ActivationStatus a ON a.id = u.isActiveId
-            WHERE UPPER(a.status) = 'ACTIVE'
+            WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(a.status, ''), CHAR(13), '')))) = 'ACTIVE'
               AND NOT EXISTS (
                   SELECT 1
                   FROM bench.BookRental br
@@ -42,7 +42,7 @@ public class MssqlUserActivationUpdateService {
             SET u.isActiveId = ?
             FROM bench.BookShopUser u
             JOIN bench.ActivationStatus a ON a.id = u.isActiveId
-            WHERE UPPER(a.status) = 'ACTIVE'
+            WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(a.status, ''), CHAR(13), '')))) = 'ACTIVE'
               AND NOT EXISTS (
                   SELECT 1
                   FROM bench.BookRental br

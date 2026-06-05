@@ -28,7 +28,7 @@ public class MssqlUserRegistrationCreateService {
     private static final String SELECT_ACTIVE_STATUS_ID = """
             SELECT TOP 1 id
             FROM bench.ActivationStatus
-            WHERE UPPER(status) = 'ACTIVE'
+            WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(status, ''), CHAR(13), '')))) = 'ACTIVE'
             ORDER BY id
             """;
 

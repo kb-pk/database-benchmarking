@@ -1,5 +1,15 @@
 #!/bin/bash
 
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/.env"
+  set +a
+fi
+
 DB_ENGINE="${1:-POSTGRESQL}"
 DB_ENGINE="${DB_ENGINE^^}"
 
@@ -13,7 +23,37 @@ case "$DB_ENGINE" in
 esac
 
 BASE_URL="http://localhost:8080"
-BENCH_ITERATIONS=4
+BENCH_WARMUP_ITERATIONS="${BENCH_WARMUP_ITERATIONS:-1}"
+BENCH_MEASURED_ITERATIONS="${BENCH_MEASURED_ITERATIONS:-3}"
+BENCH_TOTAL_ITERATIONS=$((BENCH_WARMUP_ITERATIONS + BENCH_MEASURED_ITERATIONS))
+MSSQL_SQLCMD_RETRIES="${MSSQL_SQLCMD_RETRIES:-5}"
+MSSQL_SQLCMD_RETRY_DELAY_SECONDS="${MSSQL_SQLCMD_RETRY_DELAY_SECONDS:-2}"
+MSSQL_SQLCMD_LOGIN_TIMEOUT_SECONDS="${MSSQL_SQLCMD_LOGIN_TIMEOUT_SECONDS:-60}"
+if [[ "$DB_ENGINE" == "MSSQL" ]]; then
+  BENCH_REQUEST_COOLDOWN_SECONDS="${BENCH_REQUEST_COOLDOWN_SECONDS:-0.20}"
+else
+  BENCH_REQUEST_COOLDOWN_SECONDS="${BENCH_REQUEST_COOLDOWN_SECONDS:-0}"
+fi
+
+MSSQL_EFFECTIVE_PASSWORD="${MSSQL_SA_PWD:-}"
+if [[ -z "$MSSQL_EFFECTIVE_PASSWORD" ]]; then
+  MSSQL_EFFECTIVE_PASSWORD=$(docker compose exec -T mssql /bin/bash -lc 'printf %s "$MSSQL_SA_PASSWORD"' 2>/dev/null || true)
+fi
+
+normalize_single_line_output() {
+  printf '%s\n' "$1" \
+    | tr -d '\r' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' \
+    | grep -vE '^\([0-9]+ rows affected\)$' \
+    | head -n 1
+}
+
+normalize_multi_line_output() {
+  printf '%s\n' "$1" \
+    | tr -d '\r' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' \
+    | grep -vE '^\([0-9]+ rows affected\)$'
+}
 
 wait_for_backend() {
   local probe_url="$BASE_URL/bookshop/1/books?db=POSTGRESQL&onlyAvailable=false"
@@ -47,11 +87,31 @@ call_endpoint() {
   local label="$2"
   local method="${3:-GET}"
   local code
+  local attempt
+  local max_attempts
   local tmp_output
-  tmp_output=$(mktemp)
-  code=$(curl -q -sS --retry 4 --retry-connrefused --retry-delay 1 -o "$tmp_output" -w "%{http_code}" -X "$method" "$url" || echo "000")
-  rm -f "$tmp_output"
+
+  max_attempts=1
+  if [[ "$DB_ENGINE" == "MSSQL" && "$method" == "GET" ]]; then
+    # Dla MSSQL GET-y potrafią zwrócić chwilowe 5xx przy presji pamięci.
+    max_attempts=3
+  fi
+
+  for ((attempt=1; attempt<=max_attempts; attempt++)); do
+    tmp_output=$(mktemp)
+    code=$(curl -q -sS --retry 4 --retry-connrefused --retry-delay 1 -o "$tmp_output" -w "%{http_code}" -X "$method" "$url" || echo "000")
+    rm -f "$tmp_output"
+    if [[ "$code" =~ ^2[0-9][0-9]$ || "$code" =~ ^4[0-9][0-9]$ || "$method" != "GET" || "$attempt" -eq "$max_attempts" ]]; then
+      break
+    fi
+    sleep "$MSSQL_SQLCMD_RETRY_DELAY_SECONDS"
+  done
+
   echo "${label} status=${code}"
+
+  if [[ "$BENCH_REQUEST_COOLDOWN_SECONDS" != "0" ]]; then
+    sleep "$BENCH_REQUEST_COOLDOWN_SECONDS"
+  fi
 }
 
 call_endpoint_post() {
@@ -73,9 +133,9 @@ run_for_iterations() {
   local i
   local url
 
-  for ((i=1; i<=BENCH_ITERATIONS; i++)); do
+  for ((i=1; i<=BENCH_TOTAL_ITERATIONS; i++)); do
     url="${url_template//\{i\}/$i}"
-    call_endpoint "$url" "${label} iter=${i}" "$method"
+    call_endpoint "${url}&warmupIterations=${BENCH_WARMUP_ITERATIONS}" "${label} iter=${i}" "$method"
   done
 }
 
@@ -87,18 +147,18 @@ run_delete_with_restore_iterations() {
   local delete_url
   local restore_url
 
-  for ((i=1; i<=BENCH_ITERATIONS; i++)); do
+  for ((i=1; i<=BENCH_TOTAL_ITERATIONS; i++)); do
     delete_url="${delete_url_template//\{i\}/$i}"
     restore_url="${restore_url_template//\{i\}/$i}"
-    call_endpoint_post "$delete_url" "${label} iter=${i}"
-    call_endpoint_post_without_timing "$restore_url" "${label} restore iter=${i}"
+    call_endpoint_post "${delete_url}&warmupIterations=${BENCH_WARMUP_ITERATIONS}" "${label} iter=${i}"
+    call_endpoint_post_without_timing "${restore_url}&warmupIterations=${BENCH_WARMUP_ITERATIONS}" "${label} restore iter=${i}"
   done
 }
 
 # shopId zależy od typu silnika: SQL używa liczby, Cassandra/Scylla UUID.
 if [[ "$DB_ENGINE" == "CASSANDRA" || "$DB_ENGINE" == "SCYLLA" ]]; then
   CQL_CONTAINER=$(echo "$DB_ENGINE" | tr '[:upper:]' '[:lower:]')
-  SHOP_ID=$(docker compose exec -T "$CQL_CONTAINER" cqlsh -e "USE bench; SELECT main_book_shop_id FROM users WHERE status = 'ACTIVE' LIMIT 1 ALLOW FILTERING;" \
+  SHOP_ID=$(docker compose exec -T "$CQL_CONTAINER" cqlsh -e "USE bench; SELECT shop_id FROM bookshops LIMIT 1;" \
     | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
     | head -n 1)
 
@@ -116,8 +176,8 @@ run_for_iterations "GET" "R1" "$BASE_URL/bookshop/${SHOP_ID}/books?db=${DB_ENGIN
 # R2: Pobierz aktywnych użytkowników dla sklepu (4 iteracje)
 run_for_iterations "GET" "R2" "$BASE_URL/user/active-by-shop/${SHOP_ID}?db=${DB_ENGINE}&operation=R2&iteration={i}"
 
-# R3: Top użytkownicy wg liczby rezerwacji, globalnie ze wszystkich sklepów (4 iteracje)
-run_for_iterations "GET" "R3" "$BASE_URL/user/top-by-reservations?db=${DB_ENGINE}&operation=R3&iteration={i}"
+# R3: Lista użytkowników z łączną liczbą rezerwacji i wypożyczeń, globalnie ze wszystkich sklepów (4 iteracje)
+run_for_iterations "GET" "R3" "$BASE_URL/user/activity-counts?db=${DB_ENGINE}&operation=R3&iteration={i}"
 
 # R4: Obciążenie pracowników (ile wypożyczeń obsłużyli), globalnie ze wszystkich sklepów (4 iteracje)
 run_for_iterations "GET" "R4" "$BASE_URL/bookshop/employee-rental-counts?db=${DB_ENGINE}&operation=R4&iteration={i}"
@@ -141,8 +201,58 @@ run_sql_query_single_postgres() {
 
 run_sql_query_single_mssql() {
   local query="$1"
-  docker compose exec -T mssql /bin/bash -lc "/opt/mssql-tools18/bin/sqlcmd -S localhost -C -U sa -P \"\$MSSQL_SA_PASSWORD\" -d bench -h -1 -W -Q \"$query\"" \
-    | tr -d '\r' | sed '/^$/d' | head -n 1
+  local attempt
+  local result
+
+  if [[ -z "$MSSQL_EFFECTIVE_PASSWORD" ]]; then
+    return 1
+  fi
+
+  for ((attempt=1; attempt<=MSSQL_SQLCMD_RETRIES; attempt++)); do
+    result=$(docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd \
+      -S localhost -C -U sa -P "$MSSQL_EFFECTIVE_PASSWORD" \
+      -l "$MSSQL_SQLCMD_LOGIN_TIMEOUT_SECONDS" -t 60 \
+      -d bench -h -1 -W -Q "$query" 2>/dev/null || true)
+
+    result=$(normalize_single_line_output "$result")
+
+    if [[ -n "$result" ]]; then
+      printf '%s\n' "$result"
+      return 0
+    fi
+
+    sleep "$MSSQL_SQLCMD_RETRY_DELAY_SECONDS"
+  done
+
+  return 1
+}
+
+run_sql_query_many_mssql() {
+  local query="$1"
+  local attempt
+  local result
+
+  if [[ -z "$MSSQL_EFFECTIVE_PASSWORD" ]]; then
+    return 1
+  fi
+
+  for ((attempt=1; attempt<=MSSQL_SQLCMD_RETRIES; attempt++)); do
+    result=$(docker compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd \
+      -S localhost -C -U sa -P "$MSSQL_EFFECTIVE_PASSWORD" \
+      -l "$MSSQL_SQLCMD_LOGIN_TIMEOUT_SECONDS" -t 60 \
+      -d bench -h -1 -W -Q "$query" 2>/dev/null || true)
+
+    result=$(normalize_multi_line_output "$result")
+
+    if [[ -n "$result" ]]; then
+      printf '%s\n' "$result"
+      return 0
+    fi
+
+    sleep "$MSSQL_SQLCMD_RETRY_DELAY_SECONDS"
+  done
+
+  return 1
 }
 
 run_updates_sql() {
@@ -299,11 +409,11 @@ run_creates_sql() {
       ;;
     MSSQL)
       manager_query="SELECT TOP 1 id FROM bench.Employee ORDER BY id;"
-      c4_book_query="SELECT TOP 1 id FROM bench.Book ORDER BY id;"
+      c4_book_query="SELECT TOP 4 b.id FROM bench.Book b WHERE NOT EXISTS (SELECT 1 FROM bench.BookReservation r WHERE r.bookId = b.id) ORDER BY b.id;"
       c4_user_query="SELECT TOP 1 id FROM bench.BookShopUser ORDER BY id;"
       c5_shop_query="SELECT TOP 1 b.id FROM bench.BookShop b INNER JOIN bench.Employee e ON e.primaryBookShopId = b.id ORDER BY b.id;"
-      c5_book_query="SELECT TOP 1 id FROM bench.Book WHERE bookShopId = %s ORDER BY id;"
-      c5_user_query="SELECT TOP 1 u.id FROM bench.BookShopUser u JOIN bench.ActivationStatus s ON s.id = u.isActiveId WHERE UPPER(ISNULL(s.status, '')) = 'ACTIVE' ORDER BY u.id;"
+      c5_book_query="SELECT TOP 1 b.id FROM bench.Book b WHERE b.bookShopId = %s AND NOT EXISTS (SELECT 1 FROM bench.BookRental r WHERE r.bookId = b.id) ORDER BY b.id;"
+      c5_user_query="SELECT TOP 1 u.id FROM bench.BookShopUser u JOIN bench.ActivationStatus s ON s.id = u.isActiveId WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(s.status, ''), CHAR(13), '')))) = 'ACTIVE' ORDER BY u.id;"
       c6_shop_query="SELECT TOP 1 id FROM bench.BookShop ORDER BY id;"
       ;;
     *)
@@ -333,30 +443,73 @@ run_creates_sql() {
   run_for_iterations "POST" "C3" "$BASE_URL/user/registration/create?db=${DB_ENGINE}&name=Jan&surname=Kowalski&phoneNumber=500600700&email=jan.kowalski.c3%40example.com&login=c3_uzytkownik&passwordHash=c3_przykladowy_hash&restoreAfterCreate=false&operation=C3&iteration={i}"
 
   # C4: Dodanie rezerwacji książki przez użytkownika (z kontrolą, że istnieją)
-  local c4_book_id
-  local c4_user_id
-  c4_book_id=$($query_single "$c4_book_query")
-  c4_user_id=$($query_single "$c4_user_query")
-  if [[ -z "$c4_book_id" || -z "$c4_user_id" ]]; then
-    echo "C4 pominięte: nie udało się ustalić bookId/userId dla ${DB_ENGINE}."
-    exit 1
-  fi
+  if [[ "$DB_ENGINE" == "MSSQL" ]]; then
+    local c4_user_id
+    local c4_book_ids_raw
+    local -a c4_book_ids
+    c4_user_id=$($query_single "$c4_user_query")
+    c4_book_ids_raw=$(run_sql_query_many_mssql "$c4_book_query" || true)
+    mapfile -t c4_book_ids <<< "$c4_book_ids_raw"
+    if [[ -z "$c4_user_id" || ${#c4_book_ids[@]} -lt 4 ]]; then
+      echo "C4 pominięte: nie udało się ustalić bookId/userId dla ${DB_ENGINE}."
+      exit 1
+    fi
 
-  run_for_iterations "POST" "C4" "$BASE_URL/bookshop/reservations/create?db=${DB_ENGINE}&bookId=${c4_book_id}&userId=${c4_user_id}&whenReserved=2024-01-15&restoreAfterCreate=false&operation=C4&iteration={i}"
+    for i in {1..4}; do
+      local c4_book_id
+      c4_book_id="${c4_book_ids[$((i - 1))]}"
+      call_endpoint_post "$BASE_URL/bookshop/reservations/create?db=${DB_ENGINE}&bookId=${c4_book_id}&userId=${c4_user_id}&whenReserved=2024-01-15&restoreAfterCreate=false&operation=C4&iteration=${i}" "C4 iter=${i}"
+    done
+  else
+    for i in {1..4}; do
+      local c4_book_id
+      local c4_user_id
+      c4_book_id=$($query_single "$c4_book_query")
+      c4_user_id=$($query_single "$c4_user_query")
+      if [[ -z "$c4_book_id" || -z "$c4_user_id" ]]; then
+        echo "C4 pominięte: nie udało się ustalić bookId/userId dla ${DB_ENGINE}."
+        exit 1
+      fi
+
+      call_endpoint_post "$BASE_URL/bookshop/reservations/create?db=${DB_ENGINE}&bookId=${c4_book_id}&userId=${c4_user_id}&whenReserved=2024-01-15&restoreAfterCreate=false&operation=C4&iteration=${i}" "C4 iter=${i}"
+    done
+  fi
 
   # C5: Warunkowe utworzenie wypożyczenia (użytkownik aktywny + książka należy do sklepu)
-  local c5_shop_id
-  local c5_book_id
-  local c5_user_id
-  c5_shop_id=$($query_single "$c5_shop_query")
-  c5_book_id=$($query_single "$(printf "$c5_book_query" "$c5_shop_id")")
-  c5_user_id=$($query_single "$c5_user_query")
-  if [[ -z "$c5_shop_id" || -z "$c5_book_id" || -z "$c5_user_id" ]]; then
-    echo "C5 pominięte: nie udało się ustalić shopId/bookId/userId dla ${DB_ENGINE}."
-    exit 1
-  fi
+  if [[ "$DB_ENGINE" == "MSSQL" ]]; then
+    local c5_user_id
+    local c5_pairs_raw
+    local -a c5_pairs
+    c5_user_id=$($query_single "$c5_user_query")
+    c5_pairs_raw=$(run_sql_query_many_mssql "SELECT TOP 4 CAST(b.bookShopId AS varchar(20)) + '|' + CAST(b.id AS varchar(20)) FROM bench.Book b WHERE NOT EXISTS (SELECT 1 FROM bench.BookRental r WHERE r.bookId = b.id) ORDER BY b.id;" || true)
+    mapfile -t c5_pairs <<< "$c5_pairs_raw"
+    if [[ -z "$c5_user_id" || ${#c5_pairs[@]} -lt 4 ]]; then
+      echo "C5 pominięte: nie udało się ustalić shopId/bookId/userId dla ${DB_ENGINE}."
+      exit 1
+    fi
 
-  run_for_iterations "POST" "C5" "$BASE_URL/bookshop/rentals/create-conditional?db=${DB_ENGINE}&shopId=${c5_shop_id}&bookId=${c5_book_id}&userId=${c5_user_id}&startDate=2024-01-20&restoreAfterCreate=false&operation=C5&iteration={i}"
+    for i in {1..4}; do
+      local c5_shop_id
+      local c5_book_id
+      IFS='|' read -r c5_shop_id c5_book_id <<< "${c5_pairs[$((i - 1))]}"
+      call_endpoint_post "$BASE_URL/bookshop/rentals/create-conditional?db=${DB_ENGINE}&shopId=${c5_shop_id}&bookId=${c5_book_id}&userId=${c5_user_id}&startDate=2024-01-20&restoreAfterCreate=false&operation=C5&iteration=${i}" "C5 iter=${i}"
+    done
+  else
+    for i in {1..4}; do
+      local c5_shop_id
+      local c5_book_id
+      local c5_user_id
+      c5_shop_id=$($query_single "$c5_shop_query")
+      c5_book_id=$($query_single "$(printf "$c5_book_query" "$c5_shop_id")")
+      c5_user_id=$($query_single "$c5_user_query")
+      if [[ -z "$c5_shop_id" || -z "$c5_book_id" || -z "$c5_user_id" ]]; then
+        echo "C5 pominięte: nie udało się ustalić shopId/bookId/userId dla ${DB_ENGINE}."
+        exit 1
+      fi
+
+      call_endpoint_post "$BASE_URL/bookshop/rentals/create-conditional?db=${DB_ENGINE}&shopId=${c5_shop_id}&bookId=${c5_book_id}&userId=${c5_user_id}&startDate=2024-01-20&restoreAfterCreate=false&operation=C5&iteration=${i}" "C5 iter=${i}"
+    done
+  fi
 
   # C6: Nowa dostawa do sklepu (batch 20 książek + oferta)
   local c6_shop_id
@@ -392,14 +545,14 @@ run_deletes_sql() {
       d6_book_query="SELECT b.id FROM bench.book b WHERE b.bookshopid = %s ORDER BY b.id LIMIT 1;"
       ;;
     MSSQL)
-      fresh_book_query="SELECT TOP 1 id FROM bench.Book WHERE bookShopId = %s ORDER BY id DESC;"
-      fresh_user_query="SELECT TOP 1 u.id FROM bench.BookShopUser u JOIN bench.ActivationStatus s ON s.id = u.isActiveId WHERE UPPER(ISNULL(s.status, '')) = 'ACTIVE' ORDER BY u.id DESC;"
+      fresh_book_query="SELECT TOP 1 b.id FROM bench.Book b WHERE b.bookShopId = %s AND NOT EXISTS (SELECT 1 FROM bench.BookReservation br WHERE br.bookId = b.id) AND NOT EXISTS (SELECT 1 FROM bench.BookRental r WHERE r.bookId = b.id) ORDER BY b.id DESC;"
+      fresh_user_query="SELECT TOP 1 u.id FROM bench.BookShopUser u JOIN bench.ActivationStatus s ON s.id = u.isActiveId WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(s.status, ''), CHAR(13), '')))) = 'ACTIVE' ORDER BY u.id DESC;"
       fresh_shop_query="SELECT TOP 1 b.id FROM bench.BookShop b JOIN bench.Employee e ON e.primaryBookShopId = b.id ORDER BY b.id DESC;"
       d5_shop_query="SELECT TOP 1 o.bookShopId FROM bench.BookShopOffering o JOIN bench.Employee e ON e.primaryBookShopId = o.bookShopId JOIN bench.Book b ON b.id = o.bookId AND b.bookShopId = o.bookShopId WHERE NOT EXISTS (SELECT 1 FROM bench.BookRental br WHERE br.userId = %s AND ISNULL(br.isReturned, 0) = 0 AND br.bookId = o.bookId AND br.bookShopId = o.bookShopId) ORDER BY o.id;"
-      d5_book_query="SELECT TOP 1 o.bookId FROM bench.BookShopOffering o JOIN bench.Book b ON b.id = o.bookId AND b.bookShopId = o.bookShopId WHERE o.bookShopId = %s AND NOT EXISTS (SELECT 1 FROM bench.BookRental br WHERE br.userId = %s AND ISNULL(br.isReturned, 0) = 0 AND br.bookId = o.bookId AND br.bookShopId = o.bookShopId) ORDER BY o.id;"
+      d5_book_query="SELECT TOP 1 o.bookId FROM bench.BookShopOffering o JOIN bench.Book b ON b.id = o.bookId AND b.bookShopId = o.bookShopId WHERE o.bookShopId = %s AND NOT EXISTS (SELECT 1 FROM bench.BookRental br WHERE br.bookId = o.bookId) ORDER BY o.id;"
       d6_employee_query="SELECT TOP 1 e.id FROM bench.Employee e WHERE e.primaryBookShopId IS NOT NULL ORDER BY e.id;"
       d6_shop_by_employee_query="SELECT e.primaryBookShopId FROM bench.Employee e WHERE e.id = %s;"
-      d6_book_query="SELECT TOP 1 b.id FROM bench.Book b WHERE b.bookShopId = %s ORDER BY b.id;"
+      d6_book_query="SELECT TOP 1 b.id FROM bench.Book b WHERE b.bookShopId = %s AND NOT EXISTS (SELECT 1 FROM bench.BookRental r WHERE r.bookId = b.id) ORDER BY b.id;"
       ;;
     *)
       echo "run_deletes_sql użyto dla nieobsługiwanego silnika: $DB_ENGINE"
@@ -556,7 +709,7 @@ run_creates_cql() {
   done
 
   # C2: Dodanie nowego sklepu (manager = pierwszy pracownik z CQL)
-  manager_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT employee_id FROM employees_by_shop LIMIT 1;" | grep -Eo "$uuid_re" | head -n 1)
+  manager_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT manager_id FROM bookshops LIMIT 1;" | grep -Eo "$uuid_re" | head -n 1)
 
   if [[ -z "$manager_id" ]]; then
     echo "C2 pominięte: nie udało się ustalić managerId dla ${DB_ENGINE}."
@@ -569,7 +722,7 @@ run_creates_cql() {
   run_for_iterations "POST" "C3" "$BASE_URL/user/registration/create?db=${DB_ENGINE}&name=Jan&surname=Kowalski&phoneNumber=500600700&email=jan.kowalski.c3.cql%40example.com&login=c3_cql_uzytkownik_{i}&passwordHash=c3_przykladowy_hash&restoreAfterCreate=false&operation=C3&iteration={i}"
 
   # C4: Dodanie rezerwacji książki przez użytkownika (z kontrolą, że istnieją)
-  c4_shop_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT shop_id FROM bookshops LIMIT 1;" | grep -Eo "$uuid_re" | head -n 1)
+  c4_shop_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT shop_id FROM books_by_shop LIMIT 1;" | grep -Eo "$uuid_re" | head -n 1)
   c4_user_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT user_id FROM users WHERE status = 'ACTIVE' LIMIT 1 ALLOW FILTERING;" | grep -Eo "$uuid_re" | head -n 1)
   c4_book_id=$(docker compose exec -T "$cql_container" cqlsh -e "USE bench; SELECT book_id FROM books_by_shop WHERE shop_id = ${c4_shop_id} LIMIT 1;" | grep -Eo "$uuid_re" | head -n 1)
   if [[ -z "$c4_shop_id" || -z "$c4_user_id" || -z "$c4_book_id" ]]; then

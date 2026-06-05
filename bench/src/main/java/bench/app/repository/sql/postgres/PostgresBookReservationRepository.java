@@ -3,7 +3,7 @@ package bench.app.repository.sql.postgres;
 import bench.app.model.sql.BookReservation;
 import bench.app.model.sql.User;
 import bench.app.model.common.EngagedUser;
-import bench.app.model.common.UserReservationCount;
+import bench.app.model.common.UserReservationRentalCount;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,15 +16,29 @@ import java.util.Date;
 public interface PostgresBookReservationRepository extends JpaRepository<BookReservation, Integer> {
     List<BookReservation> findByBook_BookShop_Id(int shopId);
 
-    @Query("SELECT new bench.app.model.common.UserReservationCount(u.id, u.name, u.surname, COUNT(r)) " +
-           "FROM BookReservation r JOIN r.user u JOIN r.book b WHERE b.bookShop.id = :shopId " +
-           "GROUP BY u.id, u.name, u.surname ORDER BY COUNT(r) DESC")
-    List<UserReservationCount> findTopUsersByReservationCount(@Param("shopId") int shopId);
+    @Query("SELECT new bench.app.model.common.UserReservationRentalCount(" +
+           "u.id, u.name, u.surname, " +
+           "COUNT(DISTINCT br.id), COUNT(DISTINCT rt.id), " +
+           "COUNT(DISTINCT br.id) + COUNT(DISTINCT rt.id)) " +
+           "FROM User u " +
+           "LEFT JOIN BookReservation br ON br.user = u AND br.book.bookShop.id = :shopId " +
+           "LEFT JOIN BookRental rt ON rt.user = u AND rt.bookShop.id = :shopId " +
+           "GROUP BY u.id, u.name, u.surname " +
+           "HAVING COUNT(DISTINCT br.id) > 0 OR COUNT(DISTINCT rt.id) > 0 " +
+           "ORDER BY (COUNT(DISTINCT br.id) + COUNT(DISTINCT rt.id)) DESC, u.id ASC")
+    List<UserReservationRentalCount> findUsersActivityCountsByShop(@Param("shopId") int shopId);
 
-        @Query("SELECT new bench.app.model.common.UserReservationCount(u.id, u.name, u.surname, COUNT(r)) " +
-            "FROM BookReservation r JOIN r.user u " +
-            "GROUP BY u.id, u.name, u.surname ORDER BY COUNT(r) DESC")
-        List<UserReservationCount> findTopUsersByReservationCountGlobal();
+        @Query("SELECT new bench.app.model.common.UserReservationRentalCount(" +
+            "u.id, u.name, u.surname, " +
+            "COUNT(DISTINCT br.id), COUNT(DISTINCT rt.id), " +
+            "COUNT(DISTINCT br.id) + COUNT(DISTINCT rt.id)) " +
+            "FROM User u " +
+            "LEFT JOIN BookReservation br ON br.user = u " +
+            "LEFT JOIN BookRental rt ON rt.user = u " +
+            "GROUP BY u.id, u.name, u.surname " +
+            "HAVING COUNT(DISTINCT br.id) > 0 OR COUNT(DISTINCT rt.id) > 0 " +
+            "ORDER BY (COUNT(DISTINCT br.id) + COUNT(DISTINCT rt.id)) DESC, u.id ASC")
+        List<UserReservationRentalCount> findUsersActivityCountsGlobal();
 
         @Query("SELECT new bench.app.model.common.EngagedUser(u.id, u.name, u.surname, u.phoneNumber, u.email) " +
             "FROM User u " +

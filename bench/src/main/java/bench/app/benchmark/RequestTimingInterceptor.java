@@ -28,8 +28,9 @@ public class RequestTimingInterceptor implements HandlerInterceptor {
         String dbEngine = request.getParameter("db");
         String operationLabel = resolveOperationLabel(request);
         Integer iteration = parseIteration(request.getParameter("iteration"));
+        Integer warmupIterations = parsePositiveInt(request.getParameter("warmupIterations"));
 
-        contextHolder.start(requestId, request.getMethod(), request.getRequestURI(), operationLabel, iteration, dbEngine);
+        contextHolder.start(requestId, request.getMethod(), request.getRequestURI(), operationLabel, iteration, warmupIterations, dbEngine);
         return true;
     }
 
@@ -67,13 +68,17 @@ public class RequestTimingInterceptor implements HandlerInterceptor {
     }
 
     private Integer parseIteration(String rawIteration) {
-        if (rawIteration == null || rawIteration.isBlank()) {
+        return parsePositiveInt(rawIteration);
+    }
+
+    private Integer parsePositiveInt(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
             return null;
         }
 
         try {
-            int parsed = Integer.parseInt(rawIteration.trim());
-            if (parsed >= 1 && parsed <= 4) {
+            int parsed = Integer.parseInt(rawValue.trim());
+            if (parsed >= 1) {
                 return parsed;
             }
         } catch (NumberFormatException ignored) {

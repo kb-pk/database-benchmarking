@@ -11,8 +11,10 @@ public final class RequestTimingContext {
     private final String path;
     private final String operationLabel;
     private final Integer iteration;
+    private final Integer warmupIterations;
     private final String dbEngine;
     private final long requestStartNanos;
+    private long excludedNanos;
     private final List<CrudOperationTiming> operations = new ArrayList<>();
 
     public RequestTimingContext(
@@ -21,6 +23,7 @@ public final class RequestTimingContext {
             String path,
             String operationLabel,
             Integer iteration,
+            Integer warmupIterations,
             String dbEngine
     ) {
         this.timestamp = Instant.now();
@@ -29,6 +32,7 @@ public final class RequestTimingContext {
         this.path = path;
         this.operationLabel = operationLabel;
         this.iteration = iteration;
+        this.warmupIterations = warmupIterations;
         this.dbEngine = dbEngine;
         this.requestStartNanos = System.nanoTime();
     }
@@ -37,8 +41,14 @@ public final class RequestTimingContext {
         this.operations.add(operation);
     }
 
+    public void addExcludedNanos(long excludedNanos) {
+        if (excludedNanos > 0) {
+            this.excludedNanos += excludedNanos;
+        }
+    }
+
     public RequestTimingSnapshot toSnapshot(int status, String error) {
-        long elapsedNanos = System.nanoTime() - this.requestStartNanos;
+        long elapsedNanos = System.nanoTime() - this.requestStartNanos - this.excludedNanos;
         double elapsedMillis = elapsedNanos / 1_000_000.0;
         return new RequestTimingSnapshot(
                 this.timestamp,
@@ -47,6 +57,7 @@ public final class RequestTimingContext {
                 this.path,
                 this.operationLabel,
                 this.iteration,
+                this.warmupIterations,
                 this.dbEngine,
                 status,
                 elapsedMillis,

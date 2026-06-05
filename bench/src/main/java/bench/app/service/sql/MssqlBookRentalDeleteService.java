@@ -2,6 +2,7 @@ package bench.app.service.sql;
 
 import bench.app.benchmark.BookRentalSnapshot;
 import bench.app.benchmark.BookRentalSnapshotStore;
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.BookRentalDeleteResult;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,13 +42,16 @@ public class MssqlBookRentalDeleteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final BookRentalSnapshotStore snapshotStore;
+        private final RequestTimingContextHolder timingContextHolder;
 
     public MssqlBookRentalDeleteService(
             @Qualifier("mssqlDataSource") DataSource dataSource,
-            BookRentalSnapshotStore snapshotStore
+                        BookRentalSnapshotStore snapshotStore,
+                        RequestTimingContextHolder timingContextHolder
     ) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.snapshotStore = snapshotStore;
+                this.timingContextHolder = timingContextHolder;
     }
 
     @Transactional(transactionManager = "mssqlTransactionManager")
@@ -56,9 +60,9 @@ public class MssqlBookRentalDeleteService {
             return restoreFromSnapshot(rentalId);
         }
 
-        BookRentalSnapshot snapshot = readSnapshot(rentalId);
+        BookRentalSnapshot snapshot = timingContextHolder.excludeFromTiming(() -> readSnapshot(rentalId));
         int deletedRows = jdbcTemplate.update(DELETE_RENTAL, rentalId);
-        snapshotStore.save(DB_ENGINE, rentalId, snapshot);
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, rentalId, snapshot));
 
         return new BookRentalDeleteResult(
                 rentalId,

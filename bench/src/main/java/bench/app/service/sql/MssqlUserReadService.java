@@ -18,7 +18,7 @@ public class MssqlUserReadService {
             FROM bench.BookShopUser u
             JOIN bench.ActivationStatus s ON s.id = u.isActiveId
             WHERE u.mainBookShopId = ?
-              AND UPPER(s.status) = 'ACTIVE'
+                            AND UPPER(LTRIM(RTRIM(REPLACE(ISNULL(s.status, ''), CHAR(13), '')))) = 'ACTIVE'
             ORDER BY u.id
             """;
 
