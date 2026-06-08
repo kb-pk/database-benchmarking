@@ -34,7 +34,29 @@ import java.util.UUID;
 
 @Service
 public class CassandraAnalyticsService {
+    private static final String SELECT_ACTIVE_USER_BY_STATUS = """
+        SELECT user_id
+        FROM users
+        WHERE status = 'ACTIVE'
+        LIMIT 1 ALLOW FILTERING
+        """;
+
+    private static final String SELECT_USERS_BY_PERIOD_RESERVATIONS = """
+        SELECT user_id
+        FROM reservations_by_user
+        WHERE when_reserved >= ? AND when_reserved <= ?
+        ALLOW FILTERING
+        """;
+
+    private static final String SELECT_USERS_BY_PERIOD_RENTALS = """
+        SELECT user_id
+        FROM rentals_by_user
+        WHERE start_date >= ? AND start_date <= ?
+        ALLOW FILTERING
+        """;
+
     private final CqlSession cassandraSession;
+    private volatile List<Set<String>> cachedPermissionProfiles;
 
     public CassandraAnalyticsService(@Qualifier("cassandraSession") CqlSession cassandraSession) {
         this.cassandraSession = cassandraSession;
@@ -42,17 +64,18 @@ public class CassandraAnalyticsService {
 
     public List<ActiveUser> getActiveUsersByShopId(UUID shopId) {
         List<ActiveUser> result = new ArrayList<>();
-        ResultSet rs = cassandraSession.execute("SELECT user_id, name, surname, phone_number, email, status, main_book_shop_id FROM users");
+        ResultSet rs = cassandraSession.execute(
+                SimpleStatement.builder("""
+                        SELECT user_id, name, surname, phone_number, email, status
+                        FROM users
+                        WHERE main_book_shop_id = ? AND status = ?
+                        ALLOW FILTERING
+                        """)
+                        .addPositionalValues(shopId, "ACTIVE")
+                        .build()
+        );
 
         for (Row row : rs) {
-            if (row.isNull("main_book_shop_id")) {
-                continue;
-            }
-            UUID userShopId = row.getUuid("main_book_shop_id");
-            if (!shopId.equals(userShopId)) {
-                continue;
-            }
-
             String status = row.getString("status");
             if (status == null || !"ACTIVE".equalsIgnoreCase(status.trim())) {
                 continue;
@@ -74,17 +97,17 @@ public class CassandraAnalyticsService {
 
     public List<UserReservationRentalCount> getUsersActivityCountsGlobal() {
         Map<UUID, Long> reservationCounts = new HashMap<>();
-        ResultSet reservations = cassandraSession.execute("SELECT user_id FROM reservations_by_user");
+        ResultSet reservations = cassandraSession.execute("SELECT user_id, COUNT(*) AS reservation_count FROM reservations_by_user GROUP BY user_id");
         for (Row row : reservations) {
             UUID userId = row.getUuid("user_id");
-            reservationCounts.merge(userId, 1L, Long::sum);
+            reservationCounts.put(userId, row.getLong("reservation_count"));
         }
 
         Map<UUID, Long> rentalCounts = new HashMap<>();
-        ResultSet rentals = cassandraSession.execute("SELECT user_id FROM rentals_by_user");
+        ResultSet rentals = cassandraSession.execute("SELECT user_id, COUNT(*) AS rental_count FROM rentals_by_user GROUP BY user_id");
         for (Row row : rentals) {
             UUID userId = row.getUuid("user_id");
-            rentalCounts.merge(userId, 1L, Long::sum);
+            rentalCounts.put(userId, row.getLong("rental_count"));
         }
 
         Map<UUID, UserDetails> usersById = readUsersById();
@@ -136,19 +159,22 @@ public class CassandraAnalyticsService {
         ResultSet rentals = cassandraSession.execute("SELECT employee_id FROM rentals_by_shop");
         for (Row row : rentals) {
             UUID employeeId = row.getUuid("employee_id");
-            rentalCounts.merge(employeeId, 1L, Long::sum);
+            if (employeeId != null) {
+                rentalCounts.merge(employeeId, 1L, Long::sum);
+            }
         }
 
         Map<UUID, EmployeeDetails> employeesById = readEmployeesById();
         List<EmployeeRentalCount> result = new ArrayList<>();
         for (Map.Entry<UUID, Long> entry : rentalCounts.entrySet()) {
-            EmployeeDetails employee = employeesById.get(entry.getKey());
+            UUID employeeId = entry.getKey();
+            EmployeeDetails employee = employeesById.get(employeeId);
             if (employee == null) {
                 continue;
             }
 
             result.add(new EmployeeRentalCount(
-                    uuidToPositiveLong(entry.getKey()),
+                    uuidToPositiveLong(employeeId),
                     employee.name,
                     employee.surname,
                     entry.getValue()
@@ -219,21 +245,23 @@ public class CassandraAnalyticsService {
 
     public List<EngagedUser> getEngagedUsersByPeriod(LocalDate fromDate, LocalDate toDate) {
         Set<UUID> usersWithReservations = new HashSet<>();
-        ResultSet reservations = cassandraSession.execute("SELECT user_id, when_reserved FROM reservations_by_user");
+        ResultSet reservations = cassandraSession.execute(
+                SimpleStatement.builder(SELECT_USERS_BY_PERIOD_RESERVATIONS)
+                        .addPositionalValues(fromDate, toDate)
+                        .build()
+        );
         for (Row row : reservations) {
-            LocalDate whenReserved = row.getLocalDate("when_reserved");
-            if (isWithinRange(whenReserved, fromDate, toDate)) {
-                usersWithReservations.add(row.getUuid("user_id"));
-            }
+            usersWithReservations.add(row.getUuid("user_id"));
         }
 
         Set<UUID> usersWithRentals = new HashSet<>();
-        ResultSet rentals = cassandraSession.execute("SELECT user_id, start_date FROM rentals_by_user");
+        ResultSet rentals = cassandraSession.execute(
+                SimpleStatement.builder(SELECT_USERS_BY_PERIOD_RENTALS)
+                        .addPositionalValues(fromDate, toDate)
+                        .build()
+        );
         for (Row row : rentals) {
-            LocalDate startDate = row.getLocalDate("start_date");
-            if (isWithinRange(startDate, fromDate, toDate)) {
-                usersWithRentals.add(row.getUuid("user_id"));
-            }
+            usersWithRentals.add(row.getUuid("user_id"));
         }
 
         usersWithReservations.retainAll(usersWithRentals);
@@ -263,13 +291,12 @@ public class CassandraAnalyticsService {
 
     public UserActivationBulkUpdateResult setUsersInactiveIfNoOpenRentalOrReservation(boolean restoreAfterUpdate) {
         Set<UUID> usersWithOpenRentals = new HashSet<>();
-        ResultSet rentals = cassandraSession.execute("SELECT user_id, is_returned FROM rentals_by_user");
+        ResultSet rentals = cassandraSession.execute(
+                "SELECT user_id FROM rentals_by_user WHERE is_returned = false ALLOW FILTERING"
+        );
         for (Row row : rentals) {
             UUID userId = row.getUuid("user_id");
-            Boolean isReturned = row.getBoolean("is_returned");
-            if (!Boolean.TRUE.equals(isReturned)) {
-                usersWithOpenRentals.add(userId);
-            }
+            usersWithOpenRentals.add(userId);
         }
 
         Set<UUID> usersWithReservations = new HashSet<>();
@@ -279,7 +306,9 @@ public class CassandraAnalyticsService {
         }
 
         List<UserStatusSnapshot> matchedUsers = new ArrayList<>();
-        ResultSet users = cassandraSession.execute("SELECT user_id, status, login FROM users");
+        ResultSet users = cassandraSession.execute(
+                "SELECT user_id, status, login FROM users WHERE status = 'ACTIVE' ALLOW FILTERING"
+        );
         for (Row row : users) {
             UUID userId = row.getUuid("user_id");
             String status = row.getString("status");
@@ -360,7 +389,7 @@ public class CassandraAnalyticsService {
         Set<String> previousPermissions = userRow.getSet("permissions", String.class);
         Set<String> safePreviousPermissions = previousPermissions == null ? Collections.emptySet() : new HashSet<>(previousPermissions);
 
-        List<Set<String>> profiles = readPermissionProfiles();
+        List<Set<String>> profiles = getPermissionProfiles();
         if (profiles.isEmpty()) {
             profiles = new ArrayList<>();
             profiles.add(Collections.emptySet());
@@ -579,7 +608,14 @@ public class CassandraAnalyticsService {
         List<RentalSnapshot> matchedRentals = new ArrayList<>();
 
         ResultSet rentals = cassandraSession.execute(
-                "SELECT user_id, start_date, rental_id, shop_id, is_returned, end_date FROM rentals_by_user"
+            SimpleStatement.builder("""
+                SELECT user_id, start_date, rental_id, shop_id, is_returned, end_date
+                FROM rentals_by_user
+                WHERE is_returned = false AND start_date < ?
+                ALLOW FILTERING
+                """)
+                .addPositionalValue(cutoffDate)
+                .build()
         );
         for (Row row : rentals) {
             LocalDate startDate = row.getLocalDate("start_date");
@@ -733,14 +769,19 @@ public class CassandraAnalyticsService {
     }
 
     private UUID findFirstActiveUserId() {
-        ResultSet users = cassandraSession.execute("SELECT user_id, status FROM users");
-        for (Row row : users) {
-            String status = row.getString("status");
-            if (status != null && "ACTIVE".equalsIgnoreCase(status.trim())) {
-                return row.getUuid("user_id");
-            }
+        Row row = cassandraSession.execute(SELECT_ACTIVE_USER_BY_STATUS).one();
+        return row == null ? null : row.getUuid("user_id");
+    }
+
+    private List<Set<String>> getPermissionProfiles() {
+        List<Set<String>> localCache = cachedPermissionProfiles;
+        if (localCache != null) {
+            return localCache;
         }
-        return null;
+
+        List<Set<String>> loadedProfiles = readPermissionProfiles();
+        cachedPermissionProfiles = loadedProfiles;
+        return loadedProfiles;
     }
 
     private List<Set<String>> readPermissionProfiles() {

@@ -168,12 +168,12 @@ public class MssqlInactiveUserSegmentDeleteService {
         int deletedReservations = 0;
         int deletedRentals = 0;
 
-        for (Long userId : candidateIds) {
-            deletedCards += jdbcTemplate.update(DELETE_USER_CARDS, userId);
-            deletedAccounts += jdbcTemplate.update(DELETE_USER_ACCOUNTS, userId);
-            deletedReservations += jdbcTemplate.update(DELETE_USER_RESERVATIONS, userId);
-            deletedRentals += jdbcTemplate.update(DELETE_USER_RENTALS, userId);
-            deletedUsers += jdbcTemplate.update(DELETE_USER, userId);
+                if (!candidateIds.isEmpty()) {
+                        deletedCards = deleteByUserIds("DELETE FROM bench.UserCard WHERE userId", candidateIds);
+                        deletedAccounts = deleteByUserIds("DELETE FROM bench.UserAccount WHERE userId", candidateIds);
+                        deletedReservations = deleteByUserIds("DELETE FROM bench.BookReservation WHERE userId", candidateIds);
+                        deletedRentals = deleteByUserIds("DELETE FROM bench.BookRental WHERE userId", candidateIds);
+                        deletedUsers = deleteByUserIds("DELETE FROM bench.BookShopUser WHERE id", candidateIds);
         }
 
         timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, segmentSize, new InactiveUserSegmentSnapshot(List.copyOf(snapshots))));
@@ -195,6 +195,29 @@ public class MssqlInactiveUserSegmentDeleteService {
                 false
         );
     }
+
+        private int deleteByUserIds(String deletePrefix, List<Long> userIds) {
+                final int batchSize = 500;
+                int deleted = 0;
+
+                for (int offset = 0; offset < userIds.size(); offset += batchSize) {
+                        int end = Math.min(offset + batchSize, userIds.size());
+                        List<Long> chunk = userIds.subList(offset, end);
+
+                        StringBuilder placeholders = new StringBuilder();
+                        for (int i = 0; i < chunk.size(); i++) {
+                                if (i > 0) {
+                                        placeholders.append(",");
+                                }
+                                placeholders.append("?");
+                        }
+
+                        String sql = deletePrefix + " IN (" + placeholders + ")";
+                        deleted += jdbcTemplate.update(sql, chunk.toArray());
+                }
+
+                return deleted;
+        }
 
         private List<Long> loadCandidateIds(int segmentSize, int monthsThreshold) {
                 return jdbcTemplate.query(

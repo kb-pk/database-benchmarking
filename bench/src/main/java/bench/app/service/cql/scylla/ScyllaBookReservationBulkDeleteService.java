@@ -1,5 +1,6 @@
 package bench.app.service.cql.scylla;
 
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.BookReservationBulkDeleteResult;
 import bench.app.service.cql.cassandra.CassandraBookReservationBulkDeleteService;
 import com.datastax.oss.driver.api.core.CqlSession;
@@ -10,8 +11,11 @@ import org.springframework.stereotype.Service;
 public class ScyllaBookReservationBulkDeleteService {
     private final CassandraBookReservationBulkDeleteService delegate;
 
-    public ScyllaBookReservationBulkDeleteService(@Qualifier("scyllaSession") CqlSession scyllaSession) {
-        this.delegate = new CassandraBookReservationBulkDeleteService(scyllaSession);
+    public ScyllaBookReservationBulkDeleteService(
+            @Qualifier("scyllaSession") CqlSession scyllaSession,
+            RequestTimingContextHolder timingContextHolder
+    ) {
+        this.delegate = new CassandraBookReservationBulkDeleteService(scyllaSession, timingContextHolder);
     }
 
     public BookReservationBulkDeleteResult deleteOldUnfinalizedReservations(int monthsThreshold, boolean restoreAfterDelete) {

@@ -1,10 +1,12 @@
 package bench.app.service.cql.cassandra;
 
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.UserInactiveSegmentDeleteResult;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -19,9 +21,38 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class CassandraInactiveUserSegmentDeleteService {
-    private static final String SELECT_ALL_USERS = """
+    private static final String SELECT_ALL_INACTIVE_USER_IDS = """
+            SELECT user_id
+            FROM users
+            WHERE status = 'INACTIVE'
+            ALLOW FILTERING
+            """;
+
+    private static final String SELECT_ALL_INACTIVE_USERS = """
             SELECT user_id, name, surname, phone_number, email, main_book_shop_id, status, login, permissions
             FROM users
+            WHERE status = 'INACTIVE'
+            ALLOW FILTERING
+            """;
+
+    private static final String SELECT_INACTIVE_USER_BY_ID = """
+            SELECT user_id, name, surname, phone_number, email, main_book_shop_id, status, login, permissions
+            FROM users
+            WHERE user_id = ?
+            """;
+
+    private static final String SELECT_RECENT_USER_RESERVATION = """
+            SELECT when_reserved
+            FROM reservations_by_user
+            WHERE user_id = ? AND when_reserved >= ?
+            LIMIT 1
+            """;
+
+    private static final String SELECT_RECENT_USER_RENTAL_BY_START = """
+            SELECT start_date
+            FROM rentals_by_user
+            WHERE user_id = ? AND start_date >= ?
+            LIMIT 1
             """;
 
     private static final String SELECT_USER_CREDENTIALS = """
@@ -98,10 +129,16 @@ public class CassandraInactiveUserSegmentDeleteService {
             """;
 
     private final CqlSession cassandraSession;
+        private final RequestTimingContextHolder timingContextHolder;
     private final Map<String, List<UserSnapshot>> snapshots = new ConcurrentHashMap<>();
 
-    public CassandraInactiveUserSegmentDeleteService(@Qualifier("cassandraSession") CqlSession cassandraSession) {
+        @Autowired
+        public CassandraInactiveUserSegmentDeleteService(
+                        @Qualifier("cassandraSession") CqlSession cassandraSession,
+                        RequestTimingContextHolder timingContextHolder
+        ) {
         this.cassandraSession = cassandraSession;
+                this.timingContextHolder = timingContextHolder;
     }
 
     public UserInactiveSegmentDeleteResult deleteInactiveUsersWithoutRecentActivity(int monthsThreshold, int segmentSize, boolean restoreAfterDelete) {
@@ -117,27 +154,25 @@ public class CassandraInactiveUserSegmentDeleteService {
         }
 
         LocalDate cutoff = LocalDate.now().minusMonths(monthsThreshold);
-        List<UserSnapshot> candidates = new ArrayList<>();
+                List<UUID> candidateUserIds = new ArrayList<>();
 
-        ResultSet users = cassandraSession.execute(SELECT_ALL_USERS);
+                ResultSet users = cassandraSession.execute(SELECT_ALL_INACTIVE_USER_IDS);
         for (Row userRow : users) {
             UUID userId = userRow.getUuid("user_id");
-            String status = userRow.getString("status");
-            if (status == null || !"INACTIVE".equalsIgnoreCase(status.trim())) {
+                        if (userId == null || hasRecentActivity(userId, cutoff)) {
                 continue;
             }
-
-            UserSnapshot snapshot = readUserSnapshot(userRow);
-            if (hasRecentActivity(snapshot.userId(), cutoff)) {
-                continue;
-            }
-            candidates.add(snapshot);
+                        candidateUserIds.add(userId);
         }
 
-        candidates.sort(Comparator.comparing(UserSnapshot::userId));
-        if (candidates.size() > segmentSize) {
-            candidates = new ArrayList<>(candidates.subList(0, segmentSize));
+                candidateUserIds.sort(Comparator.naturalOrder());
+                List<UUID> candidateUserIdsLimitedMutable = candidateUserIds;
+                if (candidateUserIdsLimitedMutable.size() > segmentSize) {
+                        candidateUserIdsLimitedMutable = new ArrayList<>(candidateUserIdsLimitedMutable.subList(0, segmentSize));
         }
+                final List<UUID> candidateUserIdsLimited = candidateUserIdsLimitedMutable;
+
+                List<UserSnapshot> candidates = runOutsideTiming(() -> loadSnapshotsByUserIds(candidateUserIdsLimited));
 
         int deletedUsers = 0;
         int deletedAccounts = 0;
@@ -181,7 +216,7 @@ public class CassandraInactiveUserSegmentDeleteService {
             ).wasApplied() ? 1 : 0;
         }
 
-        snapshots.put(snapshotKey(monthsThreshold, segmentSize), List.copyOf(candidates));
+        runOutsideTiming(() -> snapshots.put(snapshotKey(monthsThreshold, segmentSize), List.copyOf(candidates)));
 
         return new UserInactiveSegmentDeleteResult(
                 monthsThreshold,
@@ -313,7 +348,30 @@ public class CassandraInactiveUserSegmentDeleteService {
         );
     }
 
-    private UserSnapshot readUserSnapshot(Row userRow) {
+        private <T> T runOutsideTiming(java.util.function.Supplier<T> supplier) {
+                if (timingContextHolder == null) {
+                        return supplier.get();
+                }
+                return timingContextHolder.excludeFromTiming(supplier);
+        }
+
+        private List<UserSnapshot> loadSnapshotsByUserIds(List<UUID> userIds) {
+                List<UserSnapshot> snapshotsList = new ArrayList<>(userIds.size());
+                for (UUID userId : userIds) {
+                        Row userRow = cassandraSession.execute(
+                                        SimpleStatement.builder(SELECT_INACTIVE_USER_BY_ID)
+                                                        .addPositionalValue(userId)
+                                                        .build()
+                        ).one();
+                        if (userRow == null) {
+                                continue;
+                        }
+                        snapshotsList.add(readUserSnapshot(userRow));
+                }
+                return snapshotsList;
+        }
+
+        private UserSnapshot readUserSnapshot(Row userRow) {
         UUID userId = userRow.getUuid("user_id");
         String login = userRow.getString("login");
         String passwordHash = null;
@@ -339,7 +397,7 @@ public class CassandraInactiveUserSegmentDeleteService {
         for (Row row : reservationRows) {
             reservations.add(new ReservationSnapshot(
                     row.getUuid("user_id"),
-                    row.getLocalDate("when_reserved"),
+                                        row.getLocalDate("when_reserved"),
                     row.getUuid("reservation_id"),
                     row.getUuid("book_id"),
                     row.getString("book_title")
@@ -384,34 +442,39 @@ public class CassandraInactiveUserSegmentDeleteService {
         );
     }
 
-    private boolean hasRecentActivity(UUID userId, LocalDate cutoffDate) {
-        ResultSet reservations = cassandraSession.execute(
-                SimpleStatement.builder(SELECT_USER_RESERVATIONS)
-                        .addPositionalValue(userId)
-                        .build()
-        );
-        for (Row row : reservations) {
-            LocalDate whenReserved = row.getLocalDate("when_reserved");
-            if (whenReserved != null && !whenReserved.isBefore(cutoffDate)) {
-                return true;
-            }
-        }
+        private boolean hasRecentActivity(UUID userId, LocalDate cutoffDate) {
+                Row recentReservation = cassandraSession.execute(
+                                SimpleStatement.builder(SELECT_RECENT_USER_RESERVATION)
+                                                .addPositionalValues(userId, cutoffDate)
+                                                .build()
+                ).one();
+                if (recentReservation != null) {
+                        return true;
+                }
 
-        ResultSet rentals = cassandraSession.execute(
-                SimpleStatement.builder(SELECT_USER_RENTALS)
-                        .addPositionalValue(userId)
-                        .build()
-        );
-        for (Row row : rentals) {
-            LocalDate startDate = row.getLocalDate("start_date");
-            LocalDate endDate = row.getLocalDate("end_date");
-            if ((startDate != null && !startDate.isBefore(cutoffDate)) || (endDate != null && !endDate.isBefore(cutoffDate))) {
-                return true;
-            }
-        }
+                Row recentRentalStart = cassandraSession.execute(
+                                SimpleStatement.builder(SELECT_RECENT_USER_RENTAL_BY_START)
+                                                .addPositionalValues(userId, cutoffDate)
+                                                .build()
+                ).one();
+                if (recentRentalStart != null) {
+                        return true;
+                }
 
-        return false;
-    }
+                ResultSet rentals = cassandraSession.execute(
+                                SimpleStatement.builder(SELECT_USER_RENTALS)
+                                                .addPositionalValue(userId)
+                                                .build()
+                );
+                for (Row row : rentals) {
+                        LocalDate endDate = row.getLocalDate("end_date");
+                        if (endDate != null && !endDate.isBefore(cutoffDate)) {
+                                return true;
+                        }
+                }
+
+                return false;
+        }
 
     private String snapshotKey(int monthsThreshold, int segmentSize) {
         return monthsThreshold + ":" + segmentSize;
@@ -456,4 +519,5 @@ public class CassandraInactiveUserSegmentDeleteService {
             String rentalMethod
     ) {
     }
+
 }

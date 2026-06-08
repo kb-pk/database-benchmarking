@@ -192,3 +192,40 @@ ALTER TABLE bench.UserAccount
     ADD CONSTRAINT useraccount_fk1 FOREIGN KEY (userId) REFERENCES bench.BookShopUser(id);
 ALTER TABLE bench.UserAccount
     ADD CONSTRAINT useraccount_fk2 FOREIGN KEY (permissionsId) REFERENCES bench.UserAccountPermissions(id);
+
+-- Indeksy wydajnosciowe pod benchmark CRUD (PostgreSQL i MSSQL)
+
+-- R1, R5, C6: filtrowanie i joiny po sklepie/ksiazce
+CREATE INDEX idx_book_bookshopid_id ON bench.Book (bookShopId, id);
+CREATE INDEX idx_bookrental_bookid ON bench.BookRental (bookId);
+
+-- R2, U6, D4: segmentacja uzytkownikow po sklepie i statusie
+CREATE INDEX idx_bookshopuser_mainshop_active_id ON bench.BookShopUser (mainBookShopId, isActiveId, id);
+CREATE INDEX idx_bookshopuser_active_id ON bench.BookShopUser (isActiveId, id);
+
+-- R3, R6, U3, D3: aktywnosc usera w rezerwacjach/wypozyczeniach + zakresy dat
+CREATE INDEX idx_bookreservation_user_whenreserved ON bench.BookReservation (userId, whenReserved);
+CREATE INDEX idx_bookrental_user_startdate ON bench.BookRental (userId, startDate);
+CREATE INDEX idx_bookrental_bookshopid_startdate ON bench.BookRental (bookShopId, startDate, id);
+
+-- D3: kasowanie starych rezerwacji bez finalizacji (NOT EXISTS na BookRental)
+CREATE INDEX idx_bookreservation_whenreserved_bookid_userid ON bench.BookReservation (whenReserved, bookId, userId);
+CREATE INDEX idx_bookrental_bookid_userid_startdate ON bench.BookRental (bookId, userId, startDate);
+
+-- R4, D6: obciazenie pracownikow i kasowanie po dniu
+CREATE INDEX idx_bookrental_employee_startdate ON bench.BookRental (employeeId, startDate);
+
+-- U5: szybkie wyszukiwanie otwartych, przeterminowanych wypozyczen
+CREATE INDEX idx_bookrental_isreturned_startdate ON bench.BookRental (isReturned, startDate);
+
+-- U1
+CREATE INDEX idx_useraccount_userid ON bench.UserAccount (userId);
+
+-- U2: laczenie sklepu z godzinami otwarcia
+CREATE INDEX idx_bookshop_openinghoursid ON bench.BookShop (openingHoursId);
+
+-- U4
+CREATE INDEX idx_employee_primarybookshopid_id ON bench.Employee (primaryBookShopId, id);
+
+-- D5: usuwanie oferty po wzorcu wypozyczen usera
+CREATE INDEX idx_bookshopoffering_bookid_bookshopid ON bench.BookShopOffering (bookId, bookShopId);

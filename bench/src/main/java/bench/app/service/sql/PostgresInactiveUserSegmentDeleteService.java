@@ -169,12 +169,12 @@ public class PostgresInactiveUserSegmentDeleteService {
         int deletedReservations = 0;
         int deletedRentals = 0;
 
-        for (Long userId : candidateIds) {
-            deletedCards += jdbcTemplate.update(DELETE_USER_CARDS, userId);
-            deletedAccounts += jdbcTemplate.update(DELETE_USER_ACCOUNTS, userId);
-            deletedReservations += jdbcTemplate.update(DELETE_USER_RESERVATIONS, userId);
-            deletedRentals += jdbcTemplate.update(DELETE_USER_RENTALS, userId);
-            deletedUsers += jdbcTemplate.update(DELETE_USER, userId);
+                if (!candidateIds.isEmpty()) {
+                        deletedCards = deleteByUserIds("DELETE FROM bench.usercard WHERE userid", candidateIds);
+                        deletedAccounts = deleteByUserIds("DELETE FROM bench.useraccount WHERE userid", candidateIds);
+                        deletedReservations = deleteByUserIds("DELETE FROM bench.bookreservation WHERE userid", candidateIds);
+                        deletedRentals = deleteByUserIds("DELETE FROM bench.bookrental WHERE userid", candidateIds);
+                        deletedUsers = deleteByUserIds("DELETE FROM bench.bookshopuser WHERE id", candidateIds);
         }
 
         timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, segmentSize, new InactiveUserSegmentSnapshot(List.copyOf(snapshots))));
@@ -196,6 +196,29 @@ public class PostgresInactiveUserSegmentDeleteService {
                 false
         );
     }
+
+        private int deleteByUserIds(String deletePrefix, List<Long> userIds) {
+                final int batchSize = 500;
+                int deleted = 0;
+
+                for (int offset = 0; offset < userIds.size(); offset += batchSize) {
+                        int end = Math.min(offset + batchSize, userIds.size());
+                        List<Long> chunk = userIds.subList(offset, end);
+
+                        StringBuilder placeholders = new StringBuilder();
+                        for (int i = 0; i < chunk.size(); i++) {
+                                if (i > 0) {
+                                        placeholders.append(",");
+                                }
+                                placeholders.append("?");
+                        }
+
+                        String sql = deletePrefix + " IN (" + placeholders + ")";
+                        deleted += jdbcTemplate.update(sql, chunk.toArray());
+                }
+
+                return deleted;
+        }
 
     private UserInactiveSegmentDeleteResult restoreFromSnapshot(int monthsThreshold, int segmentSize) {
         InactiveUserSegmentSnapshot snapshot = snapshotStore.find(DB_ENGINE, monthsThreshold, segmentSize)

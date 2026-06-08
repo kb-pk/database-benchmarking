@@ -13,12 +13,18 @@ import java.util.List;
 
 @Service
 public class MssqlUserReadService {
+        private static final String SELECT_ACTIVE_STATUS_ID = """
+                        SELECT TOP 1 a.id
+                        FROM bench.ActivationStatus a
+                        WHERE UPPER(LTRIM(RTRIM(REPLACE(ISNULL(a.status, ''), CHAR(13), '')))) = 'ACTIVE'
+                        ORDER BY a.id
+                        """;
+
     private static final String QUERY = """
-            SELECT u.id, u.name, u.surname, u.phoneNumber, u.email, s.status
+                        SELECT u.id, u.name, u.surname, u.phoneNumber, u.email
             FROM bench.BookShopUser u
-            JOIN bench.ActivationStatus s ON s.id = u.isActiveId
             WHERE u.mainBookShopId = ?
-                            AND UPPER(LTRIM(RTRIM(REPLACE(ISNULL(s.status, ''), CHAR(13), '')))) = 'ACTIVE'
+                            AND u.isActiveId = ?
             ORDER BY u.id
             """;
 
@@ -47,6 +53,14 @@ public class MssqlUserReadService {
     }
 
     public List<ActiveUser> getActiveUsersByShopId(long shopId) {
+        Integer activeStatusId = jdbcTemplate.query(
+            SELECT_ACTIVE_STATUS_ID,
+            rs -> rs.next() ? rs.getInt("id") : null
+        );
+        if (activeStatusId == null) {
+            throw new IllegalArgumentException("Nie znaleziono statusu ACTIVE w bench.ActivationStatus");
+        }
+
         return jdbcTemplate.query(
                 QUERY,
                 (rs, rowNum) -> new ActiveUser(
@@ -55,9 +69,10 @@ public class MssqlUserReadService {
                         rs.getString("surname"),
                         rs.getString("phoneNumber"),
                         rs.getString("email"),
-                        rs.getString("status")
+                "ACTIVE"
                 ),
-                shopId
+            shopId,
+            activeStatusId
         );
     }
 

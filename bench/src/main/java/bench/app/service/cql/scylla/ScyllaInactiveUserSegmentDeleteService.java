@@ -1,5 +1,6 @@
 package bench.app.service.cql.scylla;
 
+import bench.app.benchmark.RequestTimingContextHolder;
 import bench.app.model.common.UserInactiveSegmentDeleteResult;
 import bench.app.service.cql.cassandra.CassandraInactiveUserSegmentDeleteService;
 import com.datastax.oss.driver.api.core.CqlSession;
@@ -10,8 +11,11 @@ import org.springframework.stereotype.Service;
 public class ScyllaInactiveUserSegmentDeleteService {
     private final CassandraInactiveUserSegmentDeleteService delegate;
 
-    public ScyllaInactiveUserSegmentDeleteService(@Qualifier("scyllaSession") CqlSession scyllaSession) {
-        this.delegate = new CassandraInactiveUserSegmentDeleteService(scyllaSession);
+    public ScyllaInactiveUserSegmentDeleteService(
+            @Qualifier("scyllaSession") CqlSession scyllaSession,
+            RequestTimingContextHolder timingContextHolder
+    ) {
+        this.delegate = new CassandraInactiveUserSegmentDeleteService(scyllaSession, timingContextHolder);
     }
 
     public UserInactiveSegmentDeleteResult deleteInactiveUsersWithoutRecentActivity(int monthsThreshold, int segmentSize, boolean restoreAfterDelete) {

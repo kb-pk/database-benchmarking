@@ -105,3 +105,31 @@ CREATE TABLE IF NOT EXISTS reservations_by_user (
     book_title text,
     PRIMARY KEY ((user_id), when_reserved, reservation_id)
 ) WITH CLUSTERING ORDER BY (when_reserved DESC);
+
+-- Indeksy wtórne pod operacje benchmarkowe (Cassandra/Scylla)
+
+-- R2, U6: filtrowanie użytkowników po sklepie głównym
+CREATE INDEX IF NOT EXISTS idx_users_main_book_shop_id ON users (main_book_shop_id);
+
+-- U3, D4: szybkie wyszukiwanie po statusie użytkownika
+CREATE INDEX IF NOT EXISTS idx_users_status ON users (status);
+
+-- R6: filtrowanie aktywności po przedziale dat
+CREATE INDEX IF NOT EXISTS idx_reservations_by_user_when_reserved ON reservations_by_user (when_reserved);
+CREATE INDEX IF NOT EXISTS idx_rentals_by_user_start_date ON rentals_by_user (start_date);
+
+-- R5/C4: lookup książki po book_id bez znajomości shop_id
+CREATE INDEX IF NOT EXISTS idx_books_by_shop_book_id ON books_by_shop (book_id);
+
+-- D6: kasowanie/wyszukiwanie wypożyczeń po employee_id i dniu
+CREATE INDEX IF NOT EXISTS idx_rentals_by_shop_employee_id ON rentals_by_shop (employee_id);
+
+-- U3, U5: szybkie zawężenie do niezwróconych wypożyczeń
+CREATE INDEX IF NOT EXISTS idx_rentals_by_user_is_returned ON rentals_by_user (is_returned);
+
+-- D1/D2: usuwanie rekordów po ID bez klucza partycji
+CREATE INDEX IF NOT EXISTS idx_reservations_by_user_reservation_id ON reservations_by_user (reservation_id);
+CREATE INDEX IF NOT EXISTS idx_rentals_by_user_rental_id ON rentals_by_user (rental_id);
+
+-- U4: wyszukiwanie pracownika bez znajomości primary_book_shop_id
+CREATE INDEX IF NOT EXISTS idx_employees_by_shop_employee_id ON employees_by_shop (employee_id);

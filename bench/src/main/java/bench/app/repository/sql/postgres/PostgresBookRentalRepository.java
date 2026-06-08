@@ -26,8 +26,8 @@ public interface PostgresBookRentalRepository extends JpaRepository<BookRental, 
     List<EmployeeRentalCount> findEmployeeRentalCountsGlobal();
 
     @Query(value = "WITH ranked_books AS ( " +
-        "  SELECT b.id as book_id, b.title, b.author, COUNT(r.id) as rental_count, " +
-        "         RANK() OVER (ORDER BY COUNT(r.id) DESC) as rank " +
+        "  SELECT b.id as book_id, b.title, b.author, COUNT(*) as rental_count, " +
+        "         RANK() OVER (ORDER BY COUNT(*) DESC) as rank " +
         "  FROM bookrental r " +
         "  JOIN book b ON r.bookid = b.id " +
         "  WHERE b.bookshopid = :shopId " +

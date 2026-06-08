@@ -42,14 +42,19 @@ public abstract class CQLBookShopService<
 
     @Override
     public List<bench.app.model.common.Book> getBooks(UUID bookShopId, boolean onlyAvailable) {
-        List<bench.app.model.common.Book> books = this.getBookShop(bookShopId).getBookOfferings();
-        if (!onlyAvailable) {
-            return books;
-        }
-
-        return books.stream()
-                .filter(book -> !book.isInReadingRoom())
-                .toList();
+        List<BookByShop> booksByShops = this.getBooksByShopRepo().findByShopId(bookShopId);
+        return booksByShops.stream()
+            .filter(book -> !onlyAvailable || !book.isInReadingRoom())
+            .map(x -> new Book(
+                null,
+                x.getAuthor(),
+                x.getTitle(),
+                x.getPublisher(),
+                x.getPublishDate() != null ? Date.valueOf(x.getPublishDate()) : null,
+                x.getPages(),
+                x.isInReadingRoom()
+            ))
+            .toList();
     }
 
         protected bench.app.model.common.BookShop toShallowBookShopModel(bench.app.model.common.BookShop shop) {

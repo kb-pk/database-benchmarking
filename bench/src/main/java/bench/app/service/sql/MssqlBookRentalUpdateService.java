@@ -15,7 +15,7 @@ public class MssqlBookRentalUpdateService {
     private static final String SELECT_OVERDUE_OPEN_RENTALS = """
             SELECT br.id, br.isReturned, br.endDate
             FROM bench.BookRental br
-            WHERE ISNULL(br.isReturned, 0) = 0
+                        WHERE br.isReturned = 0
               AND br.startDate < DATEADD(day, -?, CAST(GETDATE() AS date))
             """;
 
@@ -23,7 +23,7 @@ public class MssqlBookRentalUpdateService {
             UPDATE bench.BookRental
             SET isReturned = 1,
                 endDate = CAST(GETDATE() AS date)
-            WHERE ISNULL(isReturned, 0) = 0
+                        WHERE isReturned = 0
               AND startDate < DATEADD(day, -?, CAST(GETDATE() AS date))
             """;
 

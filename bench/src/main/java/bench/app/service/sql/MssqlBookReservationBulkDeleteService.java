@@ -75,11 +75,10 @@ public class MssqlBookReservationBulkDeleteService {
             return restoreFromSnapshot(monthsThreshold);
         }
 
-        List<BookReservationBulkSnapshot> snapshotRows = timingContextHolder.excludeFromTiming(() -> loadMatchingReservations(monthsThreshold));
         List<BookReservationBulkSnapshot> matchedRows = loadMatchingReservations(monthsThreshold);
 
         int deletedRows = jdbcTemplate.update(DELETE_MATCHING_RESERVATIONS, monthsThreshold);
-        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, snapshotRows));
+        timingContextHolder.excludeFromTiming(() -> snapshotStore.save(DB_ENGINE, monthsThreshold, matchedRows));
 
         return new BookReservationBulkDeleteResult(
                 monthsThreshold,
